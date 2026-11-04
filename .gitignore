@@ -1,1 +1,4 @@
 node_modules/
+
+# collection gerada com o AUTH_CLIENT_SECRET do .env
+collections/02-vehicles.postman_collection.json
