@@ -9,5 +9,3 @@ Estrutura esperada dentro de cada pasta (crie apenas o que for aplicável à fea
 - `mockups/` — protótipos de tela (HTML estático ou imagens exportadas).
 - `scripts/` — scripts SQL/shell específicos da feature (massa de teste, limpeza, migração pontual).
 - `subtasks/` — subtarefas geradas com a skill `subtask-writer`, usando `.claude/skills/subtask-writer/templates/subtask-template.md`, mais um índice `{codigo} - Índice das Subtarefas.md`.
-
-Nenhuma feature foi registrada ainda — crie a primeira pasta quando o próximo épico do car-inventory for priorizado.
