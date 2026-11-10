@@ -1,0 +1,1 @@
+Garanta que todos os endpoints externos para o usuário no projeto de integração seguem o que foi pedido na planilha spreadsheet-fields-so-estoque.xlsx, você não deve manter essa planilha no projeto apenas checar se os campos foram obedecidos fielmente pois ela é a base de retorno para o cliente. 
