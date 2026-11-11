@@ -376,7 +376,14 @@ sequenceDiagram
 }
 ```
 
-**Finalizar pela venda (`POST /sales` com `reservationId`):** o `LocaviaSaleWriter` inclui e aprova a venda e depois chama `SaleReservationService.complete`. Esse serviço faz o `PUT /reservas-venda/finalizar {CodigoReserva, CodigoVenda}` e grava `COMPLETED`, com `saleId` e um evento `SALE_CREATE` no histórico. Se a reserva já foi finalizada pela mesma venda, nada é feito.
+**Finalizar pela venda (`POST /sales` com `reservationId`):**
+
+- **Versão original:** o `LocaviaSaleWriter` incluía e aprovava a venda e depois chamava `SaleReservationService.complete` (`PUT /reservas-venda/finalizar`). Esse código foi removido no `cf6216d` (`02-endpoints-cleanup`).
+- **Versão atual:** o fluxo volta com o backlog `03-sales` (`03-sales-design-doc-*.md`, seção "Venda × reserva").
+  - O Locavia finaliza a reserva na mesma transação da venda (`POST /vendas-veiculos/integracao`).
+  - A integração grava na cópia `COMPLETED`, o `saleId` e um evento `SALE_CREATE` no histórico.
+  - Quando a venda é cancelada, a reserva volta para `C`, e a cópia recebe um evento `SALE_CANCEL`.
+  - As regras de veículo vendável desta reserva passam a ser compartilhadas com a venda (`VehicleSaleRulesService`).
 
 **Tratamento de erros:**
 
