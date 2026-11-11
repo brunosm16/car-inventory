@@ -190,6 +190,14 @@
   },
   "active": "cb4754ae2a800fde",
   "lastOpenFiles": [
+    "product-backlog/05-double-check-spreadsheet/double-check-spreadsheet.md",
+    "product-backlog/05-double-check-spreadsheet",
+    "product-backlog/04-mvp-instructions/mvp-instructions.md",
+    "product-backlog/04-mvp-instructions",
+    "product-backlog/03-sales/sales-implementation.md",
+    "product-backlog/03-sales",
+    "product-backlog/02-endpoints-cleanup/endpoints-cleanup-instructions.md",
+    "product-backlog/02-endpoints-cleanup",
     "product-backlog/01-reservations/01-reservations-design-doc-api-locavia-web-ts.md",
     "scripts/README.md",
     "docs/~WRL0002.tmp",
@@ -199,8 +207,6 @@
     "docs/autenticacao-api-car-inventory.md",
     "docs/Autenticacao API Car Inventory.pdf",
     "docs/~$tenticacao-api-car-inventory.docx",
-    "docs/autenticacao-api-car-inventory.docx",
-    "docs/Papel Timbrado 2026.docx",
     "product-backlog/README.md"
   ]
 }
