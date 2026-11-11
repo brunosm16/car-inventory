@@ -1,0 +1,82 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="c3res01" name="01-reservations C4 - Componentes (car-inventory)">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="titulo" value="01-reservations - api-locaviaweb-car-inventory - C4 Nível 3: Componentes" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="900" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ctrl" value="ReservationsController&#10;[Componente: NestJS]&#10;&#10;Rotas do contrato inicial + /withdrawal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="120" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="req" value="Request{Create,SaveCustomer,Cancel,Withdraw}ReservationUseCase&#10;[BaseRequestOperationUseCase]&#10;&#10;Idempotência, AsyncOperation, publica na FIFO" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="330" y="110" width="280" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="find" value="FindReservationsUseCase&#10;[Componente]&#10;&#10;Lista/detalhe da cópia; EXPIRED pelo GETDATE()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="280" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="rules" value="ReservationRulesService&#10;[Componente]&#10;&#10;Veículo vendável, venda em aberto, reserva ativa, expiração (72h / 30d), cliente" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="330" y="290" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="rcv" value="ProcessReservationUsecase&#10;[BaseReceiverUseCase]&#10;&#10;acquireForProcessing, finish, registerError" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="700" y="110" width="240" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="writer" value="ReservationWriter&#10;[Componente]&#10;&#10;create / saveCustomer / cancel / withdraw (reentrega segura)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="700" y="290" width="240" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="cust" value="LocaviaCustomerWriter&#10;[Componente]&#10;&#10;Cliente por CPF/CNPJ ou POST /clientes com Lojista S" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="290" width="240" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="syncb" value="ReservationSyncModule" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=none;align=left;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="680" y="460" width="620" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="sync" value="ReservationLocaviaSync&#10;[Componente]&#10;&#10;Chama o Locavia; grava cópia + evento de histórico" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="700" y="500" width="260" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="gw" value="LocaviaSaleReservationGateway&#10;[Componente: HTTP]&#10;&#10;POST/PUT /reservas-venda, /cancelar, /retirar, /finalizar" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="500" width="260" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="repo" value="ReservationRepository&#10;[DynamoDB]&#10;&#10;createReservation (idempotente), applyChange (SET + list_append history), findActiveBy*" style="shape=cylinder3;boundedLbl=1;whiteSpace=wrap;html=1;fillColor=#2e7d32;strokeColor=#1b5e20;fontColor=#ffffff;size=12;" vertex="1" parent="1">
+          <mxGeometry x="330" y="500" width="280" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="sale" value="SaleReservationService&#10;[Módulo de vendas]&#10;&#10;Venda exige a reserva; finaliza no Locavia" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="700" y="720" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="inv" value="GetInventoryUseCase&#10;[Módulo de inventário]&#10;&#10;Disponibilidade com reserva ativa no GETDATE()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="330" y="720" width="280" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="notifier" value="ReservationNotifier&#10;[Componente]&#10;&#10;RESERVATION_NOTIFY idempotente; webhook de reservas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="110" width="240" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="auditc" value="OperationAuditService&#10;[DynamoDB]&#10;&#10;timeline da AsyncOperation (todos os passos)" style="shape=cylinder3;boundedLbl=1;whiteSpace=wrap;html=1;fillColor=#2e7d32;strokeColor=#1b5e20;fontColor=#ffffff;size=12;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="720" width="260" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="se" value="Só Estoque&#10;[Sistema Externo]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8a8a8a;strokeColor=#666666;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="120" width="140" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="a16" value="enfileira / entrega" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="rcv" target="notifier"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a17" value="webhook" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="notifier" target="se"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a18" value="auditoria" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="sync" target="auditc"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="lw" value="api-locavia-web-ts&#10;[Sistema Externo]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438dd5;strokeColor=#2e6295;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="400" width="140" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="a1" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="ctrl" target="req"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a2" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="ctrl" target="find"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a3" value="valida" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="req" target="rules"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a4" value="SQS" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="req" target="rcv"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a5" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="rcv" target="writer"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a6" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="writer" target="cust"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a7" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="writer" target="sync"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a8" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="sync" target="gw"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a9" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="sync" target="repo"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a10" value="finalizar" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="sale" target="sync"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a11" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="find" target="repo"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a12" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="inv" target="repo"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a13" value="HTTPS" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="gw" target="lw"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a14" value="HTTPS" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="cust" target="lw"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a15" value="reserva ativa" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="rules" target="repo"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

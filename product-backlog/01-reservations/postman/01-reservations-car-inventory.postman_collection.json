@@ -1,0 +1,961 @@
+{
+  "info": {
+    "name": "01-reservations - api-locaviaweb-car-inventory",
+    "description": "Fluxo assíncrono completo das reservas (1. Só Estoque requisita, 2. integração enfileira e responde o operationId, 3. processa e chama o Locavia, 4. audita 2xx/erro no DynamoDB — timeline da operação, 5. notifica a Só Estoque): token, reservar, consultar a operação e a auditoria, acompanhar a notificação, ler a reserva, cliente (lojista), cancelar e retirar. Rotas do contrato inicial + /withdrawal. A reserva só existe depois que o receiver aplica no Locavia (api-locavia-web-ts /reservas-venda).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "externalReference",
+      "value": ""
+    },
+    {
+      "key": "operationId",
+      "value": ""
+    },
+    {
+      "key": "reservationId",
+      "value": ""
+    },
+    {
+      "key": "notificationOperationId",
+      "value": ""
+    },
+    {
+      "key": "pollTries",
+      "value": "0"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 - Token (x-api-key)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "pm.environment.set('carInventoryToken', pm.response.json().data.accessToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"clientId\": \"{{clientId}}\",\n  \"clientSecret\": \"{{clientSecret}}\"\n}"
+        },
+        "url": {
+          "raw": "{{carInventoryUrl}}/car-inventory/v1/auth/token"
+        }
+      }
+    },
+    {
+      "name": "01 - Fluxo: reservar, cliente e cancelar",
+      "item": [
+        {
+          "name": "01 - Reservar veículo (POST /reservations)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('externalReference', 'SE-RES-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 com operationId', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('operationId', pm.response.json().data.operationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalReference\": \"{{externalReference}}\",\n  \"vehicleId\": {{vehicleId}},\n  \"agreedPrice\": 73500,\n  \"customer\": {\n    \"personType\": \"INDIVIDUAL\",\n    \"document\": \"{{customerDocument}}\",\n    \"name\": \"Ana Souza\",\n    \"email\": \"ana.souza@email.com\",\n    \"phone\": \"11988887777\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations"
+            }
+          }
+        },
+        {
+          "name": "02 - Status da reserva (operação + auditoria)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json().data;",
+                  "const tries = Number(pm.collectionVariables.get('pollTries') || 0);",
+                  "if (['PENDING', 'PROCESSING'].includes(data.status) && tries < 10) {",
+                  "  pm.collectionVariables.set('pollTries', tries + 1);",
+                  "  setTimeout(() => {}, 1500);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.set('pollTries', 0);",
+                  "pm.test('operação FINISHED', () => pm.expect(data.status).to.eql('FINISHED'));",
+                  "pm.collectionVariables.set('reservationId', data.result.reservationId);",
+                  "pm.test('reserva criada no Locavia', () => pm.expect(data.result.locaviaSituation).to.eql('A'));",
+                  "const steps = (data.timeline || []).map((e) => e.step);",
+                  "pm.test('auditoria: Locavia 2xx, cópia e notificação enfileirada', () => {",
+                  "  pm.expect(steps).to.include.members(['REQUESTED', 'QUEUED', 'PROCESSING', 'LOCAVIA_REQUEST', 'LOCAVIA_SUCCESS', 'COPY_UPDATED', 'SO_ESTOQUE_NOTIFICATION_QUEUED', 'FINISHED']);",
+                  "  const ok = data.timeline.find((e) => e.step === 'LOCAVIA_SUCCESS');",
+                  "  pm.expect(ok.detail.httpStatus).to.be.within(200, 299);",
+                  "});",
+                  "pm.collectionVariables.set('notificationOperationId', data.result.notificationOperationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/operations/{{operationId}}"
+            }
+          }
+        },
+        {
+          "name": "02b - Notificação à Só Estoque (passo 5)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json().data;",
+                  "const tries = Number(pm.collectionVariables.get('pollTries') || 0);",
+                  "if (['PENDING', 'PROCESSING'].includes(data.status) && tries < 10) {",
+                  "  pm.collectionVariables.set('pollTries', tries + 1);",
+                  "  setTimeout(() => {}, 1500);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.set('pollTries', 0);",
+                  "pm.test('operação FINISHED', () => pm.expect(data.status).to.eql('FINISHED'));",
+                  "pm.test('Só Estoque notificada', () => { pm.expect(data.type).to.eql('RESERVATION_NOTIFY'); pm.expect(data.timeline.map((e) => e.step)).to.include('SO_ESTOQUE_NOTIFIED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/operations/{{notificationOperationId}}"
+            }
+          }
+        },
+        {
+          "name": "03 - Ler a reserva",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json().data;",
+                  "pm.test('ACTIVE', () => pm.expect(r.status).to.eql('ACTIVE'));",
+                  "pm.test('cliente vinculado', () => pm.expect(r.customerId).to.be.a('number'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/{{reservationId}}"
+            }
+          }
+        },
+        {
+          "name": "04 - Reenvio da mesma reserva (idempotente)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mesma operação', () => pm.expect(pm.response.json().data.duplicated).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalReference\": \"{{externalReference}}\",\n  \"vehicleId\": {{vehicleId}},\n  \"agreedPrice\": 73500,\n  \"customer\": {\n    \"personType\": \"INDIVIDUAL\",\n    \"document\": \"{{customerDocument}}\",\n    \"name\": \"Ana Souza\",\n    \"email\": \"ana.souza@email.com\",\n    \"phone\": \"11988887777\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations"
+            }
+          }
+        },
+        {
+          "name": "05 - Segunda reserva do veículo (422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              },
+              {
+                "key": "accept-language",
+                "value": "pt-BR"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalReference\": \"SE-RES-OUTRA-{{$timestamp}}\",\n  \"vehicleId\": {{vehicleId}}\n}"
+            },
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations"
+            }
+          }
+        },
+        {
+          "name": "06 - Informar o cliente (PUT /reservations/{id}/customer)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('operationId', pm.response.json().data.operationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"personType\": \"INDIVIDUAL\",\n  \"document\": \"{{customerDocument}}\",\n  \"name\": \"Ana Souza\",\n  \"email\": \"ana.souza@email.com\",\n  \"phone\": \"11988887777\"\n}"
+            },
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/{{reservationId}}/customer"
+            }
+          }
+        },
+        {
+          "name": "07 - Status do cliente (operação)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json().data;",
+                  "const tries = Number(pm.collectionVariables.get('pollTries') || 0);",
+                  "if (['PENDING', 'PROCESSING'].includes(data.status) && tries < 10) {",
+                  "  pm.collectionVariables.set('pollTries', tries + 1);",
+                  "  setTimeout(() => {}, 1500);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.set('pollTries', 0);",
+                  "pm.test('operação FINISHED', () => pm.expect(data.status).to.eql('FINISHED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/operations/{{operationId}}"
+            }
+          }
+        },
+        {
+          "name": "08 - Cancelar (POST /reservations/{id}/cancellation)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 com operationId', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('operationId', pm.response.json().data.operationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Cliente desistiu da compra\"\n}"
+            },
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/{{reservationId}}/cancellation"
+            }
+          }
+        },
+        {
+          "name": "09 - Status do cancelamento (operação)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json().data;",
+                  "const tries = Number(pm.collectionVariables.get('pollTries') || 0);",
+                  "if (['PENDING', 'PROCESSING'].includes(data.status) && tries < 10) {",
+                  "  pm.collectionVariables.set('pollTries', tries + 1);",
+                  "  setTimeout(() => {}, 1500);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.set('pollTries', 0);",
+                  "pm.test('operação FINISHED', () => pm.expect(data.status).to.eql('FINISHED'));",
+                  "pm.test('CANCELED / C', () => { pm.expect(data.result.status).to.eql('CANCELED'); pm.expect(data.result.locaviaSituation).to.eql('C'); });",
+                  "pm.collectionVariables.set('notificationOperationId', data.result.notificationOperationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/operations/{{operationId}}"
+            }
+          }
+        },
+        {
+          "name": "09b - Notificação do cancelamento à Só Estoque",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json().data;",
+                  "const tries = Number(pm.collectionVariables.get('pollTries') || 0);",
+                  "if (['PENDING', 'PROCESSING'].includes(data.status) && tries < 10) {",
+                  "  pm.collectionVariables.set('pollTries', tries + 1);",
+                  "  setTimeout(() => {}, 1500);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.set('pollTries', 0);",
+                  "pm.test('operação FINISHED', () => pm.expect(data.status).to.eql('FINISHED'));",
+                  "pm.test('Só Estoque notificada', () => { pm.expect(data.type).to.eql('RESERVATION_NOTIFY'); pm.expect(data.timeline.map((e) => e.step)).to.include('SO_ESTOQUE_NOTIFIED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/operations/{{notificationOperationId}}"
+            }
+          }
+        },
+        {
+          "name": "10 - Ler a reserva cancelada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json().data;",
+                  "pm.test('CANCELED com motivo', () => { pm.expect(r.status).to.eql('CANCELED'); pm.expect(r.cancellation.reason).to.eql('Cliente desistiu da compra'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/{{reservationId}}"
+            }
+          }
+        },
+        {
+          "name": "11 - Cancelar de novo (422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              },
+              {
+                "key": "x-idempotency-key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"de novo\"\n}"
+            },
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/{{reservationId}}/cancellation"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Fluxo: reservar e retirar",
+      "item": [
+        {
+          "name": "01 - Reservar veículo (sem cliente)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('externalReference', 'SE-RES-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 com operationId', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('operationId', pm.response.json().data.operationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalReference\": \"{{externalReference}}\",\n  \"vehicleId\": {{vehicleId}},\n  \"agreedPrice\": 73500\n}"
+            },
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations"
+            }
+          }
+        },
+        {
+          "name": "02 - Status da reserva (operação)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json().data;",
+                  "const tries = Number(pm.collectionVariables.get('pollTries') || 0);",
+                  "if (['PENDING', 'PROCESSING'].includes(data.status) && tries < 10) {",
+                  "  pm.collectionVariables.set('pollTries', tries + 1);",
+                  "  setTimeout(() => {}, 1500);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.set('pollTries', 0);",
+                  "pm.test('operação FINISHED', () => pm.expect(data.status).to.eql('FINISHED'));",
+                  "pm.collectionVariables.set('reservationId', data.result.reservationId);",
+                  "pm.test('reserva criada no Locavia', () => pm.expect(data.result.locaviaSituation).to.eql('A'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/operations/{{operationId}}"
+            }
+          }
+        },
+        {
+          "name": "03 - Retirar (POST /reservations/{id}/withdrawal)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 com operationId', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('operationId', pm.response.json().data.operationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Anúncio retirado pelo lojista\"\n}"
+            },
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/{{reservationId}}/withdrawal"
+            }
+          }
+        },
+        {
+          "name": "04 - Status da retirada (operação)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json().data;",
+                  "const tries = Number(pm.collectionVariables.get('pollTries') || 0);",
+                  "if (['PENDING', 'PROCESSING'].includes(data.status) && tries < 10) {",
+                  "  pm.collectionVariables.set('pollTries', tries + 1);",
+                  "  setTimeout(() => {}, 1500);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.set('pollTries', 0);",
+                  "pm.test('operação FINISHED', () => pm.expect(data.status).to.eql('FINISHED'));",
+                  "pm.test('WITHDRAWN / R', () => { pm.expect(data.result.status).to.eql('WITHDRAWN'); pm.expect(data.result.locaviaSituation).to.eql('R'); });",
+                  "pm.collectionVariables.set('notificationOperationId', data.result.notificationOperationId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/operations/{{operationId}}"
+            }
+          }
+        },
+        {
+          "name": "04b - Notificação da retirada à Só Estoque",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json().data;",
+                  "const tries = Number(pm.collectionVariables.get('pollTries') || 0);",
+                  "if (['PENDING', 'PROCESSING'].includes(data.status) && tries < 10) {",
+                  "  pm.collectionVariables.set('pollTries', tries + 1);",
+                  "  setTimeout(() => {}, 1500);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.set('pollTries', 0);",
+                  "pm.test('operação FINISHED', () => pm.expect(data.status).to.eql('FINISHED'));",
+                  "pm.test('Só Estoque notificada', () => { pm.expect(data.type).to.eql('RESERVATION_NOTIFY'); pm.expect(data.timeline.map((e) => e.step)).to.include('SO_ESTOQUE_NOTIFIED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/operations/{{notificationOperationId}}"
+            }
+          }
+        },
+        {
+          "name": "05 - Ler a reserva retirada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json().data;",
+                  "pm.test('WITHDRAWN com motivo', () => { pm.expect(r.status).to.eql('WITHDRAWN'); pm.expect(r.withdrawal.reason).to.eql('Anúncio retirado pelo lojista'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/{{reservationId}}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Consultas e validações",
+      "item": [
+        {
+          "name": "Listar reservas do veículo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations?vehicleId={{vehicleId}}&page=1&limit=20"
+            }
+          }
+        },
+        {
+          "name": "Listar reservas ativas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations?status=ACTIVE"
+            }
+          }
+        },
+        {
+          "name": "Reserva inexistente (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/999999999"
+            }
+          }
+        },
+        {
+          "name": "Cancelar reserva inexistente (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"x\"\n}"
+            },
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/999999999/cancellation"
+            }
+          }
+        },
+        {
+          "name": "Retirar sem motivo (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations/{{reservationId}}/withdrawal"
+            }
+          }
+        },
+        {
+          "name": "Expiração no passado (422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{carInventoryToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalReference\": \"SE-RES-EXP-{{$timestamp}}\",\n  \"vehicleId\": {{vehicleId}},\n  \"expiresAt\": \"2020-01-01T00:00:00.000Z\"\n}"
+            },
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations"
+            }
+          }
+        },
+        {
+          "name": "Sem token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{carInventoryUrl}}/car-inventory/v1/reservations"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

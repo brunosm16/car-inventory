@@ -1,0 +1,503 @@
+{
+  "info": {
+    "name": "01-reservations - api-locavia-web-ts (reservas-venda)",
+    "description": "Endpoints de reserva de venda do Locavia, usados pela integração: sessão do usuário de integração, cliente lojista, inclusão (idempotente por ReferenciaExterna), consulta, alteração, cancelamento, retirada e finalização pela venda.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{locaviaToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "referenciaExterna",
+      "value": ""
+    },
+    {
+      "key": "codigoReserva",
+      "value": ""
+    },
+    {
+      "key": "codigoCliente",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "00 - Sessão do usuário de integração (POST /sessoes)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "pm.environment.set('locaviaToken', pm.response.json().data.token);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"login\": \"{{locaviaLogin}}\",\n  \"senha\": \"{{locaviaSenha}}\",\n  \"organizacao\": \"{{locaviaOrganizacao}}\"\n}"
+        },
+        "url": {
+          "raw": "{{locaviaUrl}}/sessoes"
+        }
+      }
+    },
+    {
+      "name": "01 - Cliente lojista (POST /clientes, Lojista S)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 201) pm.collectionVariables.set('codigoCliente', pm.response.json().data.CodigoCliente);",
+              "pm.test('201 (ou 400 se o CPF já existe)', () => pm.expect([201, 400]).to.include(pm.response.code));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Lojista\": \"S\",\n  \"Pessoa\": {\n    \"TipoPessoa\": \"F\",\n    \"Estrangeiro\": \"N\",\n    \"RazaoSocial\": \"Ana Souza\",\n    \"NomeFantasia\": \"Ana Souza\",\n    \"CPF\": \"{{customerDocument}}\",\n    \"Email\": \"ana.souza@email.com\",\n    \"Telefone\": \"11988887777\",\n    \"Enderecos\": []\n  }\n}"
+        },
+        "url": {
+          "raw": "{{locaviaUrl}}/clientes"
+        }
+      }
+    },
+    {
+      "name": "02 - Incluir reserva (POST /reservas-venda)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('referenciaExterna', 'SE-RES-' + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201', () => pm.response.to.have.status(201));",
+              "const r = pm.response.json().data;",
+              "pm.collectionVariables.set('codigoReserva', r.CodigoReserva);",
+              "pm.test('Situacao A', () => pm.expect(r.Situacao).to.eql('A'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"CodigoVeiculo\": {{vehicleId}},\n  \"ReferenciaExterna\": \"{{referenciaExterna}}\",\n  \"DataExpiracao\": \"{{dataExpiracao}}\",\n  \"ValorReserva\": 73500\n}"
+        },
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda"
+        }
+      }
+    },
+    {
+      "name": "03 - Incluir de novo a mesma referência (idempotente)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201', () => pm.response.to.have.status(201));",
+              "const r = pm.response.json().data;",
+              "pm.test('mesma reserva', () => pm.expect(String(r.CodigoReserva)).to.eql(String(pm.collectionVariables.get('codigoReserva'))));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"CodigoVeiculo\": {{vehicleId}},\n  \"ReferenciaExterna\": \"{{referenciaExterna}}\",\n  \"DataExpiracao\": \"{{dataExpiracao}}\"\n}"
+        },
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda"
+        }
+      }
+    },
+    {
+      "name": "04 - Segunda reserva do veículo (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('409', () => pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"CodigoVeiculo\": {{vehicleId}},\n  \"ReferenciaExterna\": \"SE-RES-OUTRA-{{$timestamp}}\"\n}"
+        },
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda"
+        }
+      }
+    },
+    {
+      "name": "05 - Consultar pelo código (GET ?CodigoReserva)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda?CodigoReserva={{codigoReserva}}"
+        }
+      }
+    },
+    {
+      "name": "06 - Consultar pela referência (GET ?ReferenciaExterna)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda?ReferenciaExterna={{referenciaExterna}}"
+        }
+      }
+    },
+    {
+      "name": "07 - Alterar cliente e valor (PUT /reservas-venda)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "const r = pm.response.json().data;",
+              "pm.test('valor alterado', () => pm.expect(Number(r.ValorReserva)).to.eql(72000));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"CodigoReserva\": {{codigoReserva}},\n  \"CodigoCliente\": {{codigoCliente}},\n  \"ValorReserva\": 72000\n}"
+        },
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda"
+        }
+      }
+    },
+    {
+      "name": "08 - Cancelar (PUT /reservas-venda/cancelar)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "const r = pm.response.json().data;",
+              "pm.test('Situacao C', () => pm.expect(r.Situacao).to.eql('C'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"CodigoReserva\": {{codigoReserva}},\n  \"Motivo\": \"Cliente desistiu da compra\"\n}"
+        },
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda/cancelar"
+        }
+      }
+    },
+    {
+      "name": "09 - Cancelar de novo (idempotente)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "const r = pm.response.json().data;",
+              "pm.test('continua C', () => pm.expect(r.Situacao).to.eql('C'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"CodigoReserva\": {{codigoReserva}},\n  \"Motivo\": \"Cliente desistiu da compra\"\n}"
+        },
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda/cancelar"
+        }
+      }
+    },
+    {
+      "name": "10 - Nova reserva do veículo liberado",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('referenciaExterna', 'SE-RES-' + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201', () => pm.response.to.have.status(201));",
+              "const r = pm.response.json().data;",
+              "pm.collectionVariables.set('codigoReserva', r.CodigoReserva);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"CodigoVeiculo\": {{vehicleId}},\n  \"ReferenciaExterna\": \"{{referenciaExterna}}\",\n  \"DataExpiracao\": \"{{dataExpiracao}}\"\n}"
+        },
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda"
+        }
+      }
+    },
+    {
+      "name": "11 - Retirar (PUT /reservas-venda/retirar)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "const r = pm.response.json().data;",
+              "pm.test('Situacao R', () => pm.expect(r.Situacao).to.eql('R'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"CodigoReserva\": {{codigoReserva}},\n  \"Motivo\": \"Anúncio retirado pelo lojista\"\n}"
+        },
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda/retirar"
+        }
+      }
+    },
+    {
+      "name": "12 - Retirar sem motivo (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('400', () => pm.response.to.have.status(400));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"CodigoReserva\": {{codigoReserva}}\n}"
+        },
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda/retirar"
+        }
+      }
+    },
+    {
+      "name": "13 - Finalizar pela venda (PUT /reservas-venda/finalizar)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Requer uma reserva ativa (passo 10 com outro veículo) e uma venda do veículo: preencha codigoReservaFinalizar e codigoVenda no ambiente"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 (F) ou 4xx conforme a venda informada', () => pm.expect(pm.response.code).to.be.oneOf([200, 404, 422]));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"CodigoReserva\": {{codigoReservaFinalizar}},\n  \"CodigoVenda\": {{codigoVenda}}\n}"
+        },
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda/finalizar"
+        }
+      }
+    },
+    {
+      "name": "14 - Listar reservas (GET /reservas-venda)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{locaviaUrl}}/reservas-venda"
+        }
+      }
+    }
+  ]
+}

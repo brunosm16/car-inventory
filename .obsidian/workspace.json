@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "scripts/README.md",
+                "file": "product-backlog/01-reservations/01-reservations-design-doc-api-locaviaweb-car-inventory.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "README"
+              "title": "01-reservations-design-doc-api-locaviaweb-car-inventory"
             }
           }
         ]
@@ -190,6 +190,8 @@
   },
   "active": "cb4754ae2a800fde",
   "lastOpenFiles": [
+    "product-backlog/01-reservations/01-reservations-design-doc-api-locavia-web-ts.md",
+    "scripts/README.md",
     "docs/~WRL0002.tmp",
     "docs/~WRD0001.tmp",
     "docs/~WRD0000.tmp",
@@ -199,7 +201,6 @@
     "docs/~$tenticacao-api-car-inventory.docx",
     "docs/autenticacao-api-car-inventory.docx",
     "docs/Papel Timbrado 2026.docx",
-    "scripts/README.md",
     "product-backlog/README.md"
   ]
 }

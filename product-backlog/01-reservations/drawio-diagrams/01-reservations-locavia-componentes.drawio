@@ -1,0 +1,56 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="c3res02" name="01-reservations C4 - Componentes (api-locavia-web-ts)">
+    <mxGraphModel dx="1400" dy="850" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="850" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="titulo" value="01-reservations - api-locavia-web-ts - C4 Nível 3: Componentes do módulo seminovos/reservasVenda" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1000" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ci" value="api-locaviaweb-car-inventory&#10;[Sistema - Integração]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168bd;strokeColor=#0b4884;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="340" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="boundary" value="api-locavia-web-ts [Express + TypeORM]" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=none;align=left;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="80" width="760" height="680" as="geometry" />
+        </mxCell>
+        <mxCell id="routes" value="reservasVenda.routes&#10;[Express Router]&#10;&#10;POST / PUT / GET /reservas-venda&#10;PUT /cancelar /retirar /finalizar" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="330" y="320" width="230" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="ucs" value="Casos de uso&#10;[Componentes]&#10;&#10;CreateReservasVenda (idempotente por ReferenciaExterna)&#10;UpdateReservasVenda&#10;GetReservasVenda&#10;EncerrarReservasVenda (C | R)&#10;FinalizarReservasVenda (F)&#10;&#10;yup + autoTransaction" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="290" width="280" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="regras" value="ReservaVendaRegrasService&#10;[Componente]&#10;&#10;validarVeiculo (8/13, alienação, venda em aberto)&#10;validarCliente (bloqueado)&#10;validarDataExpiracao&#10;validarVeiculoSemReserva (A vencida → E; A/F → 409)&#10;validarReservaAtiva, validarVendaDoVeiculo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="540" width="280" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="repo" value="SQLReservasVendaRepository&#10;[DAOBaseRepository]&#10;&#10;Filtro de organização/empresa, log de tabela" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="330" y="560" width="230" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="clientes" value="CreateCliente (existente)&#10;[Componente]&#10;&#10;Aceita Lojista = S" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="330" y="120" width="230" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="existentes" value="Repositórios existentes&#10;[Componentes]&#10;&#10;SQLVeiculosRepository, SQLClienteRepository, SQLVendasVeiculosRepository, SQLVendasVeiculosPlacaRepository" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#999999;strokeColor=#666666;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="110" width="280" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="db" value="SQL Server LocaviaWeb&#10;&#10;ReservasVenda (nova)&#10;Clientes.Lojista (nova coluna)&#10;Veiculos, VendasVeiculos, VendasVeiculosPlacas" style="shape=cylinder3;boundedLbl=1;whiteSpace=wrap;html=1;fillColor=#2e6295;strokeColor=#1c3f5c;fontColor=#ffffff;size=12;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="330" width="240" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="HTTPS (JWT integração)" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="ci" target="routes"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" value="POST /clientes" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="ci" target="clientes"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" value="lazy import" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="routes" target="ucs"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" value="valida" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="ucs" target="regras"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" value="salva / atualiza" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="ucs" target="repo"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" value="consulta" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="regras" target="existentes">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="960" y="630" /><mxPoint x="960" y="170" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="ReservasVenda" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="repo" target="db">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="445" y="740" /><mxPoint x="1240" y="740" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="SQL" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="existentes" target="db"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
