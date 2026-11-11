@@ -1,0 +1,192 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="flsal03a" name="Fluxo - Vender">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="titulo" value="03-sales - Fluxo de venda (POST /sales) - passos 1 a 5" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="900" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="l1" value="Só Estoque" style="swimlane;horizontal=0;startSize=30;fillColor=#e0e0e0;html=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="1620" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="l2" value="car-inventory — API" style="swimlane;horizontal=0;startSize=30;fillColor=#dae8fc;html=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="210" width="1620" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="l3" value="car-inventory — Receiver" style="swimlane;horizontal=0;startSize=30;fillColor=#dae8fc;html=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="410" width="1620" height="260" as="geometry" />
+        </mxCell>
+        <mxCell id="l4" value="api-locavia-web-ts" style="swimlane;horizontal=0;startSize=30;fillColor=#d5e8d4;html=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="670" width="1620" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="s1" value="1. POST /sales" style="ellipse;whiteSpace=wrap;html=1;fillColor=#8a8a8a;fontColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="100" y="90" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="a1" value="Idempotência&#10;(externalReference)" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="250" width="150" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" value="SaleRulesService&#10;veículo, venda em aberto, reserva, cliente" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="310" y="240" width="190" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" value="AsyncOperation SALE_CREATE&#10;REQUESTED → SQS (grupo veículo) → QUEUED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168bd;fontColor=#ffffff;strokeColor=#0b4884;" vertex="1" parent="1">
+          <mxGeometry x="560" y="270" width="210" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" value="2. 201 {operationId}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8a8a8a;fontColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="580" y="95" width="170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="s2b" value="201 duplicated: true" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8a8a8a;fontColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="260" y="95" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="s2c" value="422 / 404 imediato" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b85450;fontColor=#ffffff;strokeColor=#8e3b38;" vertex="1" parent="1">
+          <mxGeometry x="420" y="95" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r1" value="3. PROCESSING&#10;venda já na cópia? (reentrega)" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="450" width="210" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="r2" value="Cliente: CPF/CNPJ existe?&#10;senão POST /clientes (Lojista S)&#10;sem customer → cliente da reserva&#10;CUSTOMER_RESOLVED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168bd;fontColor=#ffffff;strokeColor=#0b4884;" vertex="1" parent="1">
+          <mxGeometry x="820" y="460" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="r3" value="LOCAVIA_REQUEST&#10;POST /vendas-veiculos/integracao" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168bd;fontColor=#ffffff;strokeColor=#0b4884;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="470" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="r4" value="4. resposta" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="455" width="120" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="r5" value="2xx: LOCAVIA_SUCCESS&#10;cópia da venda + reserva COMPLETED&#10;COPY_UPDATED → SALE_NOTIFY → FINISHED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2e7d32;fontColor=#ffffff;strokeColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="1450" y="425" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="r6" value="4xx: LOCAVIA_ERROR&#10;FAILED terminal (DLQ)&#10;SALE_NOTIFY de falha" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b85450;fontColor=#ffffff;strokeColor=#8e3b38;" vertex="1" parent="1">
+          <mxGeometry x="1450" y="540" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="r7" value="5xx / timeout: FAILED reprocessável (backoff)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d79b00;fontColor=#ffffff;strokeColor=#996c00;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="610" width="200" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="s5" value="5. Webhook de vendas&#10;(Idempotency-Key = operationId)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8a8a8a;fontColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1450" y="90" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="w1" value="BEGIN&#10;ReferenciaExterna já existe?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="700" width="200" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="w2" value="Veículo → empresa&#10;Natureza (PortalSeminovosParametros)&#10;Reserva do veículo (409/422)&#10;TiposMidia" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438dd5;fontColor=#ffffff;strokeColor=#2e6295;" vertex="1" parent="1">
+          <mxGeometry x="800" y="710" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="w3" value="CreateVendasVeiculos (A)&#10;→ FinalizarReservasVenda (F)&#10;→ AprovarVendasVeiculos (P, veículo 9, Ituran)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438dd5;fontColor=#ffffff;strokeColor=#2e6295;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="710" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="w4" value="COMMIT&#10;201 {Venda, Reserva}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2e7d32;fontColor=#ffffff;strokeColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="725" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="w5" value="201 mesma venda&#10;(outro veículo → 409)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2e7d32;fontColor=#ffffff;strokeColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="560" y="860" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="w6" value="Erro de regra → ROLLBACK, 4xx&#10;Erro inesperado → ROLLBACK, 500" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b85450;fontColor=#ffffff;strokeColor=#8e3b38;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="860" width="240" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f1" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="s1" target="a1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f2" value="nova" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="a1" target="a2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f3" value="já existe" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="a1" target="s2b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f4" value="recusa" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="a2" target="s2c"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f5" value="ok" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="a2" target="a3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f6" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="a3" target="s2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f7" value="SQS process-sale" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="a3" target="r1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f8" value="não" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="r1" target="r2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f9" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="r2" target="r3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f10" value="HTTPS" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="r3" target="w1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1180" y="640" /><mxPoint x="660" y="640" /></Array></mxGeometry></mxCell>
+        <mxCell id="f11" value="não" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="w1" target="w2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f12" value="sim" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="w1" target="w5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f13" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="w2" target="w3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f14" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="w3" target="w4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f15" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="w3" target="w6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f16" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="w4" target="r4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f17" value="2xx" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="r4" target="r5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f18" value="4xx" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="r4" target="r6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f19" value="5xx" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="r4" target="r7"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f20" value="SALE_NOTIFY (fila)" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="r5" target="s5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f21" value="sim: resultado existente" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="r1" target="r5"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="665" y="430" /><mxPoint x="1550" y="430" /></Array></mxGeometry></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="flsal03b" name="Fluxo - Cancelar">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="titulo" value="03-sales - Fluxo de cancelamento (POST /sales/{id}/cancellation)" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="900" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="l1" value="Só Estoque" style="swimlane;horizontal=0;startSize=30;fillColor=#e0e0e0;html=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="1620" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="l2" value="car-inventory — API" style="swimlane;horizontal=0;startSize=30;fillColor=#dae8fc;html=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="210" width="1620" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="l3" value="car-inventory — Receiver" style="swimlane;horizontal=0;startSize=30;fillColor=#dae8fc;html=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="410" width="1620" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="l4" value="api-locavia-web-ts" style="swimlane;horizontal=0;startSize=30;fillColor=#d5e8d4;html=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="650" width="1620" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="s1" value="1. POST /sales/{id}/cancellation&#10;{reason}" style="ellipse;whiteSpace=wrap;html=1;fillColor=#8a8a8a;fontColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="90" y="85" width="190" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="a1" value="Venda na cópia da organização?&#10;Já cancelada?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="245" width="200" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" value="AsyncOperation SALE_CANCEL&#10;chave sale-{id}-cancel&#10;REQUESTED → SQS → QUEUED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168bd;fontColor=#ffffff;strokeColor=#0b4884;" vertex="1" parent="1">
+          <mxGeometry x="560" y="270" width="210" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" value="2. 201 {operationId}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8a8a8a;fontColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="580" y="95" width="170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="s2c" value="404 / 422 imediato" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b85450;fontColor=#ffffff;strokeColor=#8e3b38;" vertex="1" parent="1">
+          <mxGeometry x="330" y="95" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r1" value="3. PROCESSING&#10;já CANCELED na cópia?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="450" width="210" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="r3" value="LOCAVIA_REQUEST&#10;PUT /vendas-veiculos/integracao/cancelar&#10;{CodigoVenda, Motivo}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168bd;fontColor=#ffffff;strokeColor=#0b4884;" vertex="1" parent="1">
+          <mxGeometry x="840" y="470" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="r5" value="2xx: LOCAVIA_SUCCESS&#10;venda CANCELED (+ cancellation)&#10;reserva CANCELED (evento SALE_CANCEL)&#10;COPY_UPDATED → SALE_NOTIFY → FINISHED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2e7d32;fontColor=#ffffff;strokeColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="1380" y="440" width="250" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="r6" value="4xx: FAILED terminal + SALE_NOTIFY de falha&#10;5xx: reprocessa" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b85450;fontColor=#ffffff;strokeColor=#8e3b38;" vertex="1" parent="1">
+          <mxGeometry x="1380" y="560" width="250" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="s5" value="5. Webhook de vendas&#10;sale.cancel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8a8a8a;fontColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1405" y="90" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="w1" value="BEGIN&#10;venda (404); sem ReferenciaExterna (422)&#10;já C?" style="rhombus;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="680" width="230" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="w2" value="CodigoMotivoCancelamentoVenda&#10;(PortalSeminovosParametros, 422 se ausente)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438dd5;fontColor=#ffffff;strokeColor=#2e6295;" vertex="1" parent="1">
+          <mxGeometry x="830" y="705" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="w3" value="CancelarVendasVeiculos (C)&#10;NF-e, quitados, veículo 9 → 8/13&#10;Observacoes += motivo&#10;Reserva F → C (Venda cancelada.)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438dd5;fontColor=#ffffff;strokeColor=#2e6295;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="695" width="240" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="w4" value="COMMIT&#10;200 {Venda, Reserva?}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2e7d32;fontColor=#ffffff;strokeColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="1380" y="715" width="170" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="w5" value="200 sem alteração" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2e7d32;fontColor=#ffffff;strokeColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="595" y="860" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f1" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="s1" target="a1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f2" value="não / já" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="a1" target="s2c"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f3" value="ok" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="a1" target="a2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f4" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="a2" target="s2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f5" value="SQS process-sale" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="a2" target="r1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f6" value="não" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="r1" target="r3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f7" value="HTTPS" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="r3" target="w1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="960" y="620" /><mxPoint x="675" y="620" /></Array></mxGeometry></mxCell>
+        <mxCell id="f8" value="não" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="w1" target="w2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f9" value="já C" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="w1" target="w5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f10" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="w2" target="w3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f11" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="w3" target="w4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f12" value="2xx" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="w4" target="r5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f13" value="4xx / 5xx" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="w2" target="r6"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="940" y="640" /><mxPoint x="1505" y="640" /></Array></mxGeometry></mxCell>
+        <mxCell id="f14" value="SALE_NOTIFY (fila)" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="r5" target="s5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f15" value="sim: resultado existente" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="r1" target="r5"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="665" y="430" /><mxPoint x="1505" y="430" /></Array></mxGeometry></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

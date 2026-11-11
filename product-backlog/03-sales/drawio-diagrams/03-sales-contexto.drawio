@@ -1,0 +1,51 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="c1sal03" name="03-sales C4 - Contexto">
+    <mxGraphModel dx="1200" dy="700" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="720" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="titulo" value="03-sales - Venda de veículos pela Só Estoque - C4 Nível 1: Contexto" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="900" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="lojista" value="Lojista / Cliente&#10;[Pessoa]&#10;&#10;Compra um seminovo pelo Só Estoque" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="80" y="290" width="40" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="so" value="Plataforma Só Estoque&#10;[Sistema Externo]&#10;&#10;Origem das vendas: vende (com ou sem reserva) e cancela" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8a8a8a;strokeColor=#666666;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="200" y="270" width="220" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="ci" value="api-locaviaweb-car-inventory&#10;[Sistema - Integração]&#10;&#10;Recebe as vendas, processa de forma assíncrona (SQS), reflete no Locavia e mantém cópia + histórico da venda e da reserva no DynamoDB" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168bd;strokeColor=#0b4884;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="530" y="255" width="270" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="lw" value="api-locavia-web-ts (Locavia)&#10;[Sistema - registro]&#10;&#10;VendasVeiculos (A/P/C) com ReferenciaExterna, ReservasVenda (F/C), Clientes (Lojista), Veículos, PortalSeminovosParametros" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438dd5;strokeColor=#2e6295;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="910" y="255" width="280" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="ituran" value="Ituran&#10;[Sistema Externo]&#10;&#10;Rastreamento, desativado na aprovação da venda" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8a8a8a;strokeColor=#666666;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="280" width="140" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="lwweb" value="Locavia Web (tela)&#10;[Sistema existente]&#10;&#10;Consulta as vendas; configura os parâmetros do portal de seminovos" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8a8a8a;strokeColor=#666666;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="910" y="490" width="280" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="Usa" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="lojista" target="so">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="REST /sales&#10;HTTPS (x-api-key)" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="so" target="ci">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="/vendas-veiculos/integracao, /clientes&#10;HTTPS (JWT do usuário de integração)" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="ci" target="lw">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="Webhook de vendas (resultado no Locavia)&#10;HTTPS (Bearer)" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ci" target="so">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="665" y="460" /><mxPoint x="310" y="460" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="Usa" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="lwweb" target="lw">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="Desativa rastreador" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="lw" target="ituran">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
