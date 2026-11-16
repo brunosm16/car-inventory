@@ -1,0 +1,3 @@
+### Rebuild - Banco de Dados ☑️
+
+- Precisamos refazer alguns pontos desse projeto, as regras de negócio sempre estiveram confusas desde o início devido a uma indecisão entre Arquitetura, Produto e Cliente, precisamos refazer o fluxo de Banco de Dados, o repositório de integração `api-locaviaweb-car-inventory` não deve ter qualquer acesso ao banco do LocaviaWeb toda e qualquer informação que seja recuperada do banco do LocaviaWeb deve ser removida da aplicação inclusive a camada de dados com TypeORM. 
