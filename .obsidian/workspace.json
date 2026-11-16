@@ -13,10 +13,10 @@
             "state": {
               "type": "drawio-file-view",
               "state": {
-                "file": "product-backlog/05-mvp-final/drawio-diagrams/05-mvp-final-conteineres.drawio"
+                "file": "product-backlog/05-mvp-final/drawio-diagrams/05-mvp-final-locavia-componentes.drawio"
               },
               "icon": "pencil-ruler",
-              "title": "05-mvp-final-conteineres"
+              "title": "05-mvp-final-locavia-componentes"
             }
           }
         ]
@@ -149,8 +149,8 @@
                 "showSearch": false,
                 "searchQuery": ""
               },
-              "icon": "lucide-archive",
-              "title": "All properties"
+              "icon": "lucide-ghost",
+              "title": "all-properties"
             }
           },
           {
@@ -177,6 +177,8 @@
   },
   "left-ribbon": {
     "hiddenItems": {
+      "obsidian-excalidraw-plugin:Create new drawing": false,
+      "obsidian-kanban:Create new board": false,
       "switcher:Open quick switcher": false,
       "graph:Open graph view": false,
       "canvas:Create new canvas": false,
@@ -189,10 +191,14 @@
   },
   "active": "cb4754ae2a800fde",
   "lastOpenFiles": [
-    "product-backlog/05-mvp-final/drawio-diagrams/05-mvp-final-car-inventory-componentes.drawio",
+    "docs/~$spreadsheet-fields-so-estoque.xlsx",
+    "product-backlog/05-mvp-final/drawio-diagrams/05-mvp-final-fluxo-reserva.drawio",
+    "product-backlog/05-mvp-final/drawio-diagrams/05-mvp-final-contexto.drawio",
     "product-backlog/05-mvp-final/drawio-diagrams/05-mvp-final-conteineres.drawio",
-    "product-backlog/05-mvp-final/05-mvp-final-arquitetura.md",
+    "product-backlog/05-mvp-final/drawio-diagrams/05-mvp-final-car-inventory-componentes.drawio",
+    "product-backlog/05-mvp-final/drawio-diagrams/05-mvp-final-locavia-componentes.drawio",
     "product-backlog/05-mvp-final/05-mvp-final-validacao.md",
+    "product-backlog/05-mvp-final/05-mvp-final-arquitetura.md",
     "product-backlog/05-mvp-final/mvp-final.md",
     "product-backlog/01-reservations/01-reservations-design-doc-api-locaviaweb-car-inventory.md",
     "product-backlog/04-double-check-spreadsheet/double-check-spreadsheet.md",
@@ -206,14 +212,10 @@
     "product-backlog/03-double-check-spreadsheet/double-check-spreadsheet.md",
     "product-backlog/03-double-check-spreadsheet",
     "product-backlog/05-double-check-spreadsheet/double-check-spreadsheet.md",
-    "product-backlog/05-double-check-spreadsheet",
     "product-backlog/04-mvp-instructions/mvp-instructions.md",
-    "product-backlog/04-mvp-instructions",
     "product-backlog/02-endpoints-cleanup/endpoints-cleanup-instructions.md",
-    "product-backlog/02-endpoints-cleanup",
     "product-backlog/01-reservations/01-reservations-design-doc-api-locavia-web-ts.md",
     "scripts/README.md",
-    "docs/~WRL0002.tmp",
     "docs/autenticacao-api-car-inventory.md",
     "product-backlog/README.md"
   ]

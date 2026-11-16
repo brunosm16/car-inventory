@@ -1,0 +1,11 @@
+{
+  "id": "mermaid-fit",
+  "name": "Mermaid Export Fit",
+  "version": "1.0.2",
+  "minAppVersion": "0.15.0",
+  "description": "Prevents wide Mermaid diagrams from breaking during PDF/HTML export.",
+  "author": "Fuyo AIC",
+  "authorUrl": "",
+  "fundingUrl": "",
+  "isDesktopOnly": false
+}
