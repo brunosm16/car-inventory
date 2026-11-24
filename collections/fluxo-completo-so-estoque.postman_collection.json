@@ -1,0 +1,3464 @@
+{
+  "info": {
+    "_postman_id": "0dda8d87-b495-404a-a3ab-ceba0565accd",
+    "name": "Fluxo completo Só Estoque - Locavia e Integração",
+    "description": "Teste de ponta a ponta da integração com a Só Estoque, com os endpoints do Locavia (api-locavia-web-ts) e da integração (api-locaviaweb-car-inventory) numa collection só. Rode a collection inteira no **Runner** e na ordem: os passos assíncronos se repetem sozinhos até terminar (fora do Runner, envie de novo).\n\n1. Desmobilização: o Locavia publica o veículo, a integração consome, grava e envia para a Só Estoque.\n2. Reserva: criada, atualizada e cancelada pela integração; o Locavia processa pela fila e devolve o resultado.\n3. Reserva retirada.\n4. Pagamento: reserva + pagamento da reserva (o Locavia grava em PagamentosReservaVeiculo, ligado à reserva e ao veículo) + cancelamento do pagamento; a reserva é cancelada no fim.\n5. Validações e 6. Situação das filas (esperando, em processamento e DLQ).\n\nAmbiente:\n- integração: `docker compose up -d` (LocalStack na 4567 e mock da Só Estoque na 3020) e `npm run dev` (porta 3001), com no `.env` `API_SO_ESTOQUE_VEHICLE_WEBHOOK_URL=http://localhost:3020/vehicle-notifications`, `API_SO_ESTOQUE_RESERVATION_WEBHOOK_URL=http://localhost:3020/reservation-notifications` e `API_SO_ESTOQUE_PAYMENT_WEBHOOK_URL=http://localhost:3020/payment-notifications`;\n- Locavia: `npm run dev`, publicando e consumindo no MESMO LocalStack da integração:\n\n```\nAWS_REGION=us-east-1\nAWS_SQS_BASE_URL=http://localhost:4567/000000000000\nAWS_SQS_ENDPOINT=http://localhost:4567\nAWS_ACCESS_KEY_ID=test\nAWS_SECRET_ACCESS_KEY=test\n```\n\nDados:\n- `locaviaSenha` e `clientSecret` vêm preenchidos com os valores do `.env` local; troque se o seu ambiente for outro;\n- o veículo é o da primeira desmobilização disponível para venda (ou a do `codigoVeiculo` informado); ele precisa estar à venda no Locavia (status 8 ou 13) e sem reserva ativa;\n- 2.1 reserva com um cliente que não existe no Locavia (CPF novo a cada execução): o Locavia cadastra o cliente como lojista (conferido em 2.4a); as reservas seguintes usam o mesmo cliente, já existente.\n\n- cada pasta roda sozinha: antes de cada requisição a collection faz login no Locavia e pega o token da integração quando faltam ou venceram e, se a placa estiver vazia, escolhe um veículo da integração sem reserva (por exemplo, a pasta 4 pode ser rodada direto).\n\nO fluxo termina com o veículo à venda e sem reserva: pode ser repetido.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const v = (k) => pm.collectionVariables.get(k);",
+          "const set = (k, x) => pm.collectionVariables.set(k, x);",
+          "const nome = pm.info.requestName;",
+          "const json = (r) => { try { return r.json() || {}; } catch (e) { return {}; } };",
+          "const pedido = (method, url, body, headers) => ({ url, method, header: Object.assign({ 'Content-Type': 'application/json' }, headers || {}), body: body ? { mode: 'raw', raw: JSON.stringify(body) } : undefined });",
+          "const valido = (jwt) => {",
+          "  if (!jwt) return false;",
+          "  try { let s = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); s += '==='.slice((s.length + 3) % 4); const p = JSON.parse(CryptoJS.enc.Base64.parse(s).toString(CryptoJS.enc.Utf8)); return !p.exp || p.exp * 1000 > Date.now() + 60000; } catch (e) { return true; }",
+          "};",
+          "const corpo = (pm.request.body && pm.request.body.raw) || '';",
+          "const usa = (k) => (pm.request.url.toString() + corpo).includes('{{' + k + '}}');",
+          "",
+          "function tokenLocavia(seguir) {",
+          "  if (nome === 'Locavia - login' || valido(v('locaviaToken'))) return seguir();",
+          "  pm.sendRequest(pedido('POST', v('locaviaUrl') + '/sessoes', { login: v('locaviaLogin'), senha: v('locaviaSenha'), organizacao: v('locaviaOrganizacao') }), (e, r) => {",
+          "    const t = (json(r).data || {}).token;",
+          "    if (t) set('locaviaToken', t); else console.warn('Login no Locavia falhou', e || (r && r.text()));",
+          "    seguir();",
+          "  });",
+          "}",
+          "",
+          "function tokenIntegracao(seguir) {",
+          "  if (nome === 'Integração - token' || valido(v('token'))) return seguir();",
+          "  pm.sendRequest(pedido('POST', v('baseUrl') + '/auth/token', { clientId: v('clientId'), clientSecret: v('clientSecret') }), (e, r) => {",
+          "    const t = (json(r).data || {}).accessToken;",
+          "    if (t) set('token', t); else console.warn('Token da integração falhou', e || (r && r.text()));",
+          "    seguir();",
+          "  });",
+          "}",
+          "",
+          "function veiculoLivre() {",
+          "  const novaReserva = nome.includes('reservar');",
+          "  if (!usa('placa') || (v('placa') && !novaReserva)) return;",
+          "  pm.sendRequest(pedido('GET', v('baseUrl') + '/vehicles?situacao=Aberta&limit=50', null, { 'x-api-key': v('token') }), (e, r) => {",
+          "    const lista = Array.isArray(json(r).data) ? json(r).data : [];",
+          "    const semReserva = (x) => !(x.mensagem || {}).dadosReserva && !(x.reservas || []).some((y) => ['Ativa', 'Pendente'].includes(y.situacao));",
+          "    const atual = lista.find((x) => x.placa === v('placa'));",
+          "    if (atual && semReserva(atual)) return;",
+          "    const livre = lista.find(semReserva);",
+          "    if (!livre) return console.warn('Nenhum veículo livre na integração: rode a pasta 1 - Desmobilização');",
+          "    set('placa', livre.placa);",
+          "    set('codigoVeiculo', livre.codigoVeiculo);",
+          "    set('codigoDesmobilizacao', livre.mensagem.dadosDesmobilizacao.codigoDesmobilizacao);",
+          "    console.log('Veículo do teste: ' + livre.codigoVeiculo + ' ' + livre.placa);",
+          "  });",
+          "}",
+          "",
+          "tokenLocavia(() => tokenIntegracao(veiculoLivre));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "0 - Preparação",
+      "description": "Sessão no Locavia e token da integração.",
+      "item": [
+        {
+          "name": "Locavia - login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const token = ((pm.response.json() || {}).data || {}).token;",
+                  "pm.test('token do Locavia', () => pm.expect(token).to.be.a('string').and.not.empty);",
+                  "if (token) pm.collectionVariables.set('locaviaToken', token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/sessoes",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "sessoes"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"{{locaviaLogin}}\",\n  \"senha\": \"{{locaviaSenha}}\",\n  \"organizacao\": \"{{locaviaOrganizacao}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const token = ((pm.response.json() || {}).data || {}).accessToken;",
+                  "pm.test('token da integração', () => pm.expect(token).to.be.a('string').and.not.empty);",
+                  "if (token) pm.collectionVariables.set('token', token);",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"{{clientId}}\",\n  \"clientSecret\": \"{{clientSecret}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1 - Desmobilização",
+      "description": "Locavia → fila `lw-integracao-desmobilizacao-so-estoque` → integração (DynamoDB) → Só Estoque.",
+      "item": [
+        {
+          "name": "1.1 Locavia - recuperar veículos disponíveis para venda",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const codigoVeiculo = pm.collectionVariables.get('codigoVeiculo');",
+                  "const filtro = { page: 1, limit: 20 };",
+                  "if (codigoVeiculo) filtro.CodigoVeiculo = [Number(codigoVeiculo)];",
+                  "pm.collectionVariables.set('filtroDesmobilizacoes', JSON.stringify(filtro));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const items = ((pm.response.json() || {}).data || {}).items || [];",
+                  "pm.test('há desmobilização disponível para venda', () => pm.expect(items).to.not.be.empty);",
+                  "const item = items.find((i) => !i.DadosReserva);",
+                  "pm.test('há veículo sem reserva para o teste', () => pm.expect(item, 'todos com reserva: rode preparar-veiculos-a-venda.sql ou informe codigoVeiculo').to.be.an('object'));",
+                  "if (item) {",
+                  "  pm.collectionVariables.set('codigoDesmobilizacao', item.CodigoDesmobilizacao);",
+                  "  pm.collectionVariables.set('codigoVeiculo', item.CodigoVeiculo);",
+                  "  pm.collectionVariables.set('placa', item.Placa);",
+                  "  console.log('Desmobilização ' + item.CodigoDesmobilizacao + ' - veículo ' + item.CodigoVeiculo + ' ' + item.Placa);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/desmobilizacoes-integracao-gerenciador",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "desmobilizacoes-integracao-gerenciador"
+              ]
+            },
+            "description": "Desmobilizações com tipo de venda e veículo À venda ou em Perda total (só essas podem ir para a Só Estoque). Grava `codigoDesmobilizacao`, `codigoVeiculo` e `placa` do primeiro veículo sem reserva (ou do `codigoVeiculo` informado).",
+            "body": {
+              "mode": "raw",
+              "raw": "{{filtroDesmobilizacoes}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.2 Locavia - colocar veículo na fila de integração",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const r = ((pm.response.json() || {}).data || [])[0] || {};",
+                  "pm.test('publicada na fila (' + r.Mensagem + ')', () => { pm.expect(r.Sucesso).to.eql(true); pm.expect(r.CodigoMensagemFila).to.be.a('string'); });",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/desmobilizacoes-integracao-gerenciador/disponibilizacao",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "desmobilizacoes-integracao-gerenciador",
+                "disponibilizacao"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"CodigoDesmobilizacao\": [{{codigoDesmobilizacao}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.3 Só Estoque (mock) - veículo recebido",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const entregas = (pm.response.json() || []).filter((e) => e.vehicle && e.vehicle.placa === pm.collectionVariables.get('placa'));",
+                  "const e = entregas.filter((x) => x.vehicle.mensagem.dadosDesmobilizacao.codigoDesmobilizacao === pm.collectionVariables.get('codigoDesmobilizacao')).pop();",
+                  "const pronto = !!e;",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando a integração consumir a fila (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  pm.test('veículo entregue à Só Estoque', () => pm.expect(e, 'não entregue').to.be.an('object'));",
+                  "  if (e) { pm.test('evento vehicle.demobilization', () => pm.expect(e.event).to.eql('vehicle.demobilization')); console.log(e); }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{soEstoqueMockUrl}}/vehicle-notifications",
+              "host": [
+                "{{soEstoqueMockUrl}}"
+              ],
+              "path": [
+                "vehicle-notifications"
+              ]
+            },
+            "description": "A integração consumiu a fila, gravou o veículo e entregou à Só Estoque."
+          },
+          "response": []
+        },
+        {
+          "name": "1.4 Integração - consultar o veículo enviado para a Só Estoque",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const v = ((pm.response.json() || {}).data || [])[0];",
+                  "pm.test('veículo {{placa}} na integração', () => pm.expect(v).to.be.an('object'));",
+                  "if (v) {",
+                  "  pm.test('situação, desmobilização e manutenção', () => {",
+                  "    pm.expect(['Aberta', 'Fechada', 'Cancelada']).to.include(v.situacao);",
+                  "    pm.expect(v.mensagem.dadosDesmobilizacao.codigoDesmobilizacao).to.eql(pm.collectionVariables.get('codigoDesmobilizacao'));",
+                  "    pm.expect(v.mensagem.dadosManutencao.ordensServico).to.be.an('array');",
+                  "    pm.expect(v.reservas).to.be.an('array');",
+                  "    pm.expect(v.pagamentos).to.be.an('array');",
+                  "  });",
+                  "  console.log(v);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles?placa={{placa}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles"
+              ],
+              "query": [
+                {
+                  "key": "placa",
+                  "value": "{{placa}}"
+                }
+              ]
+            },
+            "description": "Veículo gravado no DynamoDB com a mensagem do Locavia, as reservas e os pagamentos."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2 - Reserva: criar, atualizar e cancelar",
+      "description": "Integração → fila `lw-integracao-reserva-so-estoque` → Locavia → `-retorno` → integração → Só Estoque. A reserva é feita com um cliente novo (CPF gerado a cada execução), que o Locavia cadastra como lojista.",
+      "item": [
+        {
+          "name": "2.1 Só Estoque - reservar com cliente que não existe no Locavia",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const digitos = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10));",
+                  "const dv = (numeros) => { const soma = numeros.reduce((acc, d, i) => acc + d * (numeros.length + 1 - i), 0); const resto = (soma * 10) % 11; return resto === 10 ? 0 : resto; };",
+                  "digitos.push(dv(digitos));",
+                  "digitos.push(dv(digitos));",
+                  "pm.collectionVariables.set('cpfCliente', digitos.join(''));",
+                  "console.log('Cliente novo: CPF ' + pm.collectionVariables.get('cpfCliente'));",
+                  "pm.collectionVariables.set('refReserva', 'SE-RES-' + Date.now());",
+                  "const expiracao = new Date(Date.now() - 3 * 60 * 60 * 1000 + 2 * 24 * 60 * 60 * 1000).toISOString();",
+                  "pm.collectionVariables.set('dataExpiracao', expiracao);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "pm.test('operação registrada e enviada ao Locavia', () => pm.expect(d.operationId).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('operationId', d.operationId);",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations"
+              ]
+            },
+            "description": "Reserva feita na Só Estoque com um cliente que NÃO existe no Locavia (CPF novo gerado a cada execução): o Locavia cadastra o cliente como lojista ao processar a reserva.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"referenciaExterna\": \"{{refReserva}}\",\n  \"placa\": \"{{placa}}\",\n  \"dataExpiracao\": \"{{dataExpiracao}}\",\n  \"valorAcordado\": 70000,\n  \"cliente\": {\n    \"tipoPessoa\": \"Fisica\",\n    \"documento\": \"{{cpfCliente}}\",\n    \"nome\": \"Cliente Teste So Estoque\",\n    \"email\": \"cliente.teste@email.com\",\n    \"telefone\": \"11988887777\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.2 Integração - operação de reserva",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando o Locavia processar (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message + (d.lastError.detail ? ' (' + d.lastError.detail + ')' : '') : '';",
+                  "  pm.test('RESERVATION_CREATE FINISHED (atual: ' + d.status + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('RESERVATION_CREATE');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "  if (d.result && d.result.reservationId) pm.collectionVariables.set('codigoReserva', d.result.reservationId);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "Operação assíncrona `RESERVATION_CREATE`: espera o Locavia processar pela fila e a integração aplicar o resultado e avisar a Só Estoque. Esperado: `FINISHED`."
+          },
+          "response": []
+        },
+        {
+          "name": "2.3a Integração - 409 segunda reserva do mesmo veículo",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('refDuplicada', 'SE-RES-DUP-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409', () => pm.expect(pm.response.code).to.eql(409));",
+                  "pm.test('mensagem cita a reserva vigente', () => pm.expect(pm.response.text()).to.include(pm.collectionVariables.get('refReserva')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations"
+              ]
+            },
+            "description": "O veículo já está reservado: a integração recusa na hora, sem enviar ao Locavia.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"referenciaExterna\": \"{{refDuplicada}}\",\n  \"placa\": \"{{placa}}\",\n  \"dataExpiracao\": \"{{dataExpiracao}}\",\n  \"valorAcordado\": 70000,\n  \"cliente\": {\n    \"tipoPessoa\": \"Fisica\",\n    \"documento\": \"{{cpfCliente}}\",\n    \"nome\": \"Cliente Teste So Estoque\",\n    \"email\": \"cliente.teste@email.com\",\n    \"telefone\": \"11988887777\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.3 Integração - reserva com o veículo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const r = (pm.response.json() || {}).data || {};",
+                  "pm.test('reserva Ativa com o veículo {{placa}}', () => {",
+                  "  pm.expect(r.situacao).to.eql('Ativa');",
+                  "  pm.expect(r.veiculo.placa).to.eql(pm.collectionVariables.get('placa'));",
+                  "  pm.expect(r.operacaoPendente).to.be.undefined;",
+                  "});",
+                  "pm.test('código da reserva no Locavia', () => pm.expect(r.codigoReserva).to.eql(pm.collectionVariables.get('codigoReserva')));",
+                  "pm.test('cliente do Locavia na reserva', () => pm.expect(r.codigoCliente).to.be.a('number'));",
+                  "pm.collectionVariables.set('codigoCliente', String(r.codigoCliente));",
+                  "console.log(r);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/{{refReserva}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "{{refReserva}}"
+              ]
+            },
+            "description": "Esperado: situação `Ativa`, com o veículo associado."
+          },
+          "response": []
+        },
+        {
+          "name": "2.4 Locavia - conferir reserva criada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const resposta = (pm.response.json() || {}).data;",
+                  "const reservas = Array.isArray(resposta) ? resposta : (resposta && resposta.items) || [];",
+                  "const reserva = reservas.find((x) => x.ReferenciaExterna === pm.collectionVariables.get('refReserva')) || {};",
+                  "pm.test('Locavia: reserva ' + reserva.CodigoReserva + ' Situacao A', () => pm.expect(reserva.Situacao).to.eql('A'));",
+                  "console.log(reserva);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/reservas-veiculo/consulta?ReferenciaExterna={{refReserva}}",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "reservas-veiculo",
+                "consulta"
+              ],
+              "query": [
+                {
+                  "key": "ReferenciaExterna",
+                  "value": "{{refReserva}}"
+                }
+              ]
+            },
+            "description": "Tabela ReservasVeiculo. Esperado: Situacao `A`."
+          },
+          "response": []
+        },
+        {
+          "name": "2.4a Locavia - cliente cadastrado como lojista",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const clientes = ((pm.response.json() || {}).data || {}).items || [];",
+                  "pm.test('cliente criado com o CPF da reserva', () => pm.expect(clientes).to.have.lengthOf(1));",
+                  "const cliente = clientes[0] || {};",
+                  "pm.test('lojista', () => pm.expect(cliente.Lojista).to.eql('S'));",
+                  "pm.test('mesmo cliente da reserva (' + cliente.CodigoCliente + ')', () => pm.expect(String(cliente.CodigoCliente)).to.eql(pm.collectionVariables.get('codigoCliente')));",
+                  "console.log(clientes.map((c) => ({ CodigoCliente: c.CodigoCliente, Lojista: c.Lojista, Nome: (c.Pessoa || {}).RazaoSocial, CPF: (c.Pessoa || {}).CPF })));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/clientes?filters=Clientes__Pessoa.CPF={{cpfCliente}}&limit=5",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "filters",
+                  "value": "Clientes__Pessoa.CPF={{cpfCliente}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "O Locavia não tinha o CPF e cadastrou o cliente como lojista ao processar a reserva."
+          },
+          "response": []
+        },
+        {
+          "name": "2.5 Só Estoque (mock) - reserva criada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const entregas = (pm.response.json() || []).filter((e) => e.externalReference === pm.collectionVariables.get('refReserva') && e.event === 'reservation.create');",
+                  "const e = entregas[entregas.length - 1];",
+                  "const pronto = !!e;",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando a entrega à Só Estoque (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  pm.test('reservation.create entregue à Só Estoque', () => pm.expect(e, 'não entregue').to.be.an('object'));",
+                  "  if (e) {",
+                  "    pm.test('sucesso', () => pm.expect(e.success).to.eql(true));",
+                  "    pm.test('reserva Ativa', () => pm.expect(e.reservation.situacao).to.eql('Ativa'));",
+                  "    console.log(e);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{soEstoqueMockUrl}}/reservation-notifications",
+              "host": [
+                "{{soEstoqueMockUrl}}"
+              ],
+              "path": [
+                "reservation-notifications"
+              ]
+            },
+            "description": "Webhook da Só Estoque (json-server do docker-compose da integração). Esperado: evento `reservation.create` com sucesso."
+          },
+          "response": []
+        },
+        {
+          "name": "2.6 Integração - veículo com a reserva",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const v = ((pm.response.json() || {}).data || [])[0];",
+                  "pm.test('veículo {{placa}} na integração', () => pm.expect(v).to.be.an('object'));",
+                  "if (v) {",
+                  "  pm.test('dadosReserva = reserva ativa', () => pm.expect(v.mensagem.dadosReserva.codigoReserva).to.eql(pm.collectionVariables.get('codigoReserva')));",
+                  "  pm.test('reserva na lista do veículo', () => pm.expect(v.reservas.map((x) => x.referenciaExterna)).to.include(pm.collectionVariables.get('refReserva')));",
+                  "  console.log(v);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles?placa={{placa}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles"
+              ],
+              "query": [
+                {
+                  "key": "placa",
+                  "value": "{{placa}}"
+                }
+              ]
+            },
+            "description": "O veículo mostra a reserva que o segura no Locavia."
+          },
+          "response": []
+        },
+        {
+          "name": "2.7 Integração - atualizar valor da reserva",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "pm.test('operação registrada e enviada ao Locavia', () => pm.expect(d.operationId).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('operationId', d.operationId);",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/{{refReserva}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "{{refReserva}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"valorAcordado\": 68000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.8 Integração - operação de atualização",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando o Locavia processar (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message + (d.lastError.detail ? ' (' + d.lastError.detail + ')' : '') : '';",
+                  "  pm.test('RESERVATION_UPDATE FINISHED (atual: ' + d.status + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('RESERVATION_UPDATE');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "Operação assíncrona `RESERVATION_UPDATE`: espera o Locavia processar pela fila e a integração aplicar o resultado e avisar a Só Estoque. Esperado: `FINISHED`."
+          },
+          "response": []
+        },
+        {
+          "name": "2.9 Integração - reserva atualizada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const r = (pm.response.json() || {}).data || {};",
+                  "pm.test('reserva Ativa com o veículo {{placa}}', () => {",
+                  "  pm.expect(r.situacao).to.eql('Ativa');",
+                  "  pm.expect(r.veiculo.placa).to.eql(pm.collectionVariables.get('placa'));",
+                  "  pm.expect(r.operacaoPendente).to.be.undefined;",
+                  "});",
+                  "pm.test('valor 68000', () => pm.expect(r.valorAcordado).to.eql(68000));",
+                  "console.log(r);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/{{refReserva}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "{{refReserva}}"
+              ]
+            },
+            "description": "Esperado: situação `Ativa`, com o veículo associado."
+          },
+          "response": []
+        },
+        {
+          "name": "2.10 Integração - cancelar reserva",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "pm.test('operação registrada e enviada ao Locavia', () => pm.expect(d.operationId).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('operationId', d.operationId);",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/{{refReserva}}/cancellation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "{{refReserva}}",
+                "cancellation"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo\": \"Cliente desistiu (teste)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.11 Integração - operação de cancelamento",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando o Locavia processar (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message + (d.lastError.detail ? ' (' + d.lastError.detail + ')' : '') : '';",
+                  "  pm.test('RESERVATION_CANCEL FINISHED (atual: ' + d.status + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('RESERVATION_CANCEL');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "Operação assíncrona `RESERVATION_CANCEL`: espera o Locavia processar pela fila e a integração aplicar o resultado e avisar a Só Estoque. Esperado: `FINISHED`."
+          },
+          "response": []
+        },
+        {
+          "name": "2.12 Integração - reserva cancelada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const r = (pm.response.json() || {}).data || {};",
+                  "pm.test('reserva Cancelada com o veículo {{placa}}', () => {",
+                  "  pm.expect(r.situacao).to.eql('Cancelada');",
+                  "  pm.expect(r.veiculo.placa).to.eql(pm.collectionVariables.get('placa'));",
+                  "  pm.expect(r.operacaoPendente).to.be.undefined;",
+                  "});",
+                  "pm.test('motivo', () => pm.expect(r.motivo).to.eql('Cliente desistiu (teste)'));",
+                  "console.log(r);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/{{refReserva}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "{{refReserva}}"
+              ]
+            },
+            "description": "Esperado: situação `Cancelada`, com o veículo associado."
+          },
+          "response": []
+        },
+        {
+          "name": "2.13 Locavia - conferir reserva cancelada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const resposta = (pm.response.json() || {}).data;",
+                  "const reservas = Array.isArray(resposta) ? resposta : (resposta && resposta.items) || [];",
+                  "const reserva = reservas.find((x) => x.ReferenciaExterna === pm.collectionVariables.get('refReserva')) || {};",
+                  "pm.test('Locavia: reserva ' + reserva.CodigoReserva + ' Situacao C', () => pm.expect(reserva.Situacao).to.eql('C'));",
+                  "console.log(reserva);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/reservas-veiculo/consulta?ReferenciaExterna={{refReserva}}",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "reservas-veiculo",
+                "consulta"
+              ],
+              "query": [
+                {
+                  "key": "ReferenciaExterna",
+                  "value": "{{refReserva}}"
+                }
+              ]
+            },
+            "description": "Tabela ReservasVeiculo. Esperado: Situacao `C`."
+          },
+          "response": []
+        },
+        {
+          "name": "2.14 Só Estoque (mock) - reserva cancelada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const entregas = (pm.response.json() || []).filter((e) => e.externalReference === pm.collectionVariables.get('refReserva') && e.event === 'reservation.cancel');",
+                  "const e = entregas[entregas.length - 1];",
+                  "const pronto = !!e;",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando a entrega à Só Estoque (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  pm.test('reservation.cancel entregue à Só Estoque', () => pm.expect(e, 'não entregue').to.be.an('object'));",
+                  "  if (e) {",
+                  "    pm.test('sucesso', () => pm.expect(e.success).to.eql(true));",
+                  "    console.log(e);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{soEstoqueMockUrl}}/reservation-notifications",
+              "host": [
+                "{{soEstoqueMockUrl}}"
+              ],
+              "path": [
+                "reservation-notifications"
+              ]
+            },
+            "description": "Webhook da Só Estoque (json-server do docker-compose da integração). Esperado: evento `reservation.cancel` com sucesso."
+          },
+          "response": []
+        },
+        {
+          "name": "2.15 Integração - veículo liberado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const v = ((pm.response.json() || {}).data || [])[0];",
+                  "pm.test('veículo {{placa}} na integração', () => pm.expect(v).to.be.an('object'));",
+                  "if (v) {",
+                  "  pm.test('dadosReserva nulo', () => pm.expect(v.mensagem.dadosReserva).to.be.null);",
+                  "  console.log(v);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles?placa={{placa}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles"
+              ],
+              "query": [
+                {
+                  "key": "placa",
+                  "value": "{{placa}}"
+                }
+              ]
+            },
+            "description": "Sem reserva segurando o veículo."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3 - Reserva: retirar",
+      "description": "Nova reserva retirada pelo lojista.",
+      "item": [
+        {
+          "name": "3.1 Integração - reservar o veículo",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('refReservaRetirada', 'SE-RES-' + Date.now());",
+                  "const expiracao = new Date(Date.now() - 3 * 60 * 60 * 1000 + 2 * 24 * 60 * 60 * 1000).toISOString();",
+                  "pm.collectionVariables.set('dataExpiracao', expiracao);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "pm.test('operação registrada e enviada ao Locavia', () => pm.expect(d.operationId).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('operationId', d.operationId);",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations"
+              ]
+            },
+            "description": "Reserva feita na Só Estoque: a integração grava pendente e publica `reserva.criar` em `lw-integracao-reserva-so-estoque`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"referenciaExterna\": \"{{refReservaRetirada}}\",\n  \"placa\": \"{{placa}}\",\n  \"dataExpiracao\": \"{{dataExpiracao}}\",\n  \"valorAcordado\": 70000,\n  \"cliente\": {\n    \"tipoPessoa\": \"Fisica\",\n    \"documento\": \"{{cpfCliente}}\",\n    \"nome\": \"Cliente Teste So Estoque\",\n    \"email\": \"cliente.teste@email.com\",\n    \"telefone\": \"11988887777\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 Integração - operação de reserva",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando o Locavia processar (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message + (d.lastError.detail ? ' (' + d.lastError.detail + ')' : '') : '';",
+                  "  pm.test('RESERVATION_CREATE FINISHED (atual: ' + d.status + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('RESERVATION_CREATE');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "Operação assíncrona `RESERVATION_CREATE`: espera o Locavia processar pela fila e a integração aplicar o resultado e avisar a Só Estoque. Esperado: `FINISHED`."
+          },
+          "response": []
+        },
+        {
+          "name": "3.3 Integração - retirar reserva",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "pm.test('operação registrada e enviada ao Locavia', () => pm.expect(d.operationId).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('operationId', d.operationId);",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/{{refReservaRetirada}}/withdrawal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "{{refReservaRetirada}}",
+                "withdrawal"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo\": \"Lojista retirou (teste)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.4 Integração - operação de retirada",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando o Locavia processar (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message + (d.lastError.detail ? ' (' + d.lastError.detail + ')' : '') : '';",
+                  "  pm.test('RESERVATION_WITHDRAW FINISHED (atual: ' + d.status + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('RESERVATION_WITHDRAW');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "Operação assíncrona `RESERVATION_WITHDRAW`: espera o Locavia processar pela fila e a integração aplicar o resultado e avisar a Só Estoque. Esperado: `FINISHED`."
+          },
+          "response": []
+        },
+        {
+          "name": "3.5 Integração - reserva retirada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const r = (pm.response.json() || {}).data || {};",
+                  "pm.test('reserva Retirada com o veículo {{placa}}', () => {",
+                  "  pm.expect(r.situacao).to.eql('Retirada');",
+                  "  pm.expect(r.veiculo.placa).to.eql(pm.collectionVariables.get('placa'));",
+                  "  pm.expect(r.operacaoPendente).to.be.undefined;",
+                  "});",
+                  "console.log(r);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/{{refReservaRetirada}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "{{refReservaRetirada}}"
+              ]
+            },
+            "description": "Esperado: situação `Retirada`, com o veículo associado."
+          },
+          "response": []
+        },
+        {
+          "name": "3.6 Locavia - conferir reserva retirada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const resposta = (pm.response.json() || {}).data;",
+                  "const reservas = Array.isArray(resposta) ? resposta : (resposta && resposta.items) || [];",
+                  "const reserva = reservas.find((x) => x.ReferenciaExterna === pm.collectionVariables.get('refReservaRetirada')) || {};",
+                  "pm.test('Locavia: reserva ' + reserva.CodigoReserva + ' Situacao R', () => pm.expect(reserva.Situacao).to.eql('R'));",
+                  "console.log(reserva);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/reservas-veiculo/consulta?ReferenciaExterna={{refReservaRetirada}}",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "reservas-veiculo",
+                "consulta"
+              ],
+              "query": [
+                {
+                  "key": "ReferenciaExterna",
+                  "value": "{{refReservaRetirada}}"
+                }
+              ]
+            },
+            "description": "Tabela ReservasVeiculo. Esperado: Situacao `R`."
+          },
+          "response": []
+        },
+        {
+          "name": "3.7 Só Estoque (mock) - reserva retirada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const entregas = (pm.response.json() || []).filter((e) => e.externalReference === pm.collectionVariables.get('refReservaRetirada') && e.event === 'reservation.withdraw');",
+                  "const e = entregas[entregas.length - 1];",
+                  "const pronto = !!e;",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando a entrega à Só Estoque (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  pm.test('reservation.withdraw entregue à Só Estoque', () => pm.expect(e, 'não entregue').to.be.an('object'));",
+                  "  if (e) {",
+                  "    pm.test('sucesso', () => pm.expect(e.success).to.eql(true));",
+                  "    console.log(e);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{soEstoqueMockUrl}}/reservation-notifications",
+              "host": [
+                "{{soEstoqueMockUrl}}"
+              ],
+              "path": [
+                "reservation-notifications"
+              ]
+            },
+            "description": "Webhook da Só Estoque (json-server do docker-compose da integração). Esperado: evento `reservation.withdraw` com sucesso."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4 - Pagamento da reserva: registrar e cancelar",
+      "description": "Integração → fila `locaviaweb-integracao-pagamento-so-estoque` → Locavia (grava em PagamentosReservaVeiculo, ligado à reserva e ao veículo) → `-retorno` → integração → Só Estoque. Termina cancelando a reserva para liberar o veículo.",
+      "item": [
+        {
+          "name": "4.1 Integração - reservar o veículo",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('refReservaPagamento', 'SE-RES-' + Date.now());",
+                  "const expiracao = new Date(Date.now() - 3 * 60 * 60 * 1000 + 2 * 24 * 60 * 60 * 1000).toISOString();",
+                  "pm.collectionVariables.set('dataExpiracao', expiracao);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "pm.test('operação registrada e enviada ao Locavia', () => pm.expect(d.operationId).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('operationId', d.operationId);",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations"
+              ]
+            },
+            "description": "Reserva feita na Só Estoque: a integração grava pendente e publica `reserva.criar` em `lw-integracao-reserva-so-estoque`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"referenciaExterna\": \"{{refReservaPagamento}}\",\n  \"placa\": \"{{placa}}\",\n  \"dataExpiracao\": \"{{dataExpiracao}}\",\n  \"valorAcordado\": 70000,\n  \"cliente\": {\n    \"tipoPessoa\": \"Fisica\",\n    \"documento\": \"{{cpfCliente}}\",\n    \"nome\": \"Cliente Teste So Estoque\",\n    \"email\": \"cliente.teste@email.com\",\n    \"telefone\": \"11988887777\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.2 Integração - operação de reserva",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando o Locavia processar (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message + (d.lastError.detail ? ' (' + d.lastError.detail + ')' : '') : '';",
+                  "  pm.test('RESERVATION_CREATE FINISHED (atual: ' + d.status + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('RESERVATION_CREATE');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "Operação assíncrona `RESERVATION_CREATE`: espera o Locavia processar pela fila e a integração aplicar o resultado e avisar a Só Estoque. Esperado: `FINISHED`."
+          },
+          "response": []
+        },
+        {
+          "name": "4.3 Integração - registrar pagamento da reserva",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('refPagamento', 'SE-PAG-' + Date.now());",
+                  "pm.collectionVariables.set('dataPagamento', new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "pm.test('operação registrada e enviada ao Locavia', () => pm.expect(d.operationId).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('operationId', d.operationId);",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments"
+              ]
+            },
+            "description": "Pagamento feito na Só Estoque: a integração grava pendente e publica `pagamento.registrar` com o `CodigoReserva` e o veículo da reserva.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"referenciaExterna\": \"{{refPagamento}}\",\n  \"referenciaExternaReserva\": \"{{refReservaPagamento}}\",\n  \"valor\": 5000,\n  \"dataPagamento\": \"{{dataPagamento}}\",\n  \"formaPagamento\": \"PIX\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.4 Integração - operação de pagamento",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando o Locavia processar (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message + (d.lastError.detail ? ' (' + d.lastError.detail + ')' : '') : '';",
+                  "  pm.test('PAYMENT_REGISTER FINISHED (atual: ' + d.status + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('PAYMENT_REGISTER');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "  if (d.result && d.result.paymentId) pm.collectionVariables.set('codigoPagamento', d.result.paymentId);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "Operação assíncrona `PAYMENT_REGISTER`: espera o Locavia processar pela fila e a integração aplicar o resultado e avisar a Só Estoque. Esperado: `FINISHED`."
+          },
+          "response": []
+        },
+        {
+          "name": "4.5 Integração - pagamento com a reserva e o veículo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const g = (pm.response.json() || {}).data || {};",
+                  "pm.test('pagamento Pago no Locavia (' + g.codigoPagamento + ')', () => pm.expect(g.situacao).to.eql('Pago'));",
+                  "pm.test('valor, data e forma de pagamento', () => { pm.expect(g.valor).to.eql(5000); pm.expect(g.formaPagamento).to.eql('PIX'); pm.expect(g.dataPagamento).to.be.a('string'); });",
+                  "pm.test('ligado à reserva e ao veículo', () => { pm.expect(g.reserva.referenciaExterna).to.eql(pm.collectionVariables.get('refReservaPagamento')); pm.expect(g.reserva.codigoReserva).to.be.a('string'); pm.expect(g.veiculo.placa).to.eql(pm.collectionVariables.get('placa')); });",
+                  "console.log(g);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/{{refPagamento}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "{{refPagamento}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.6 Só Estoque (mock) - pagamento registrado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const entregas = (pm.response.json() || []).filter((e) => e.externalReference === pm.collectionVariables.get('refPagamento') && e.event === 'payment.register');",
+                  "const e = entregas[entregas.length - 1];",
+                  "const pronto = !!e;",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando a entrega à Só Estoque (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  pm.test('payment.register entregue à Só Estoque', () => pm.expect(e, 'não entregue').to.be.an('object'));",
+                  "  if (e) {",
+                  "    pm.test('sucesso', () => pm.expect(e.success).to.eql(true));",
+                  "    pm.test('pagamento Pago', () => pm.expect(e.payment.situacao).to.eql('Pago'));",
+                  "    console.log(e);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{soEstoqueMockUrl}}/payment-notifications",
+              "host": [
+                "{{soEstoqueMockUrl}}"
+              ],
+              "path": [
+                "payment-notifications"
+              ]
+            },
+            "description": "Webhook da Só Estoque (json-server do docker-compose da integração). Esperado: evento `payment.register` com sucesso."
+          },
+          "response": []
+        },
+        {
+          "name": "4.7 Integração - veículo com o pagamento",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const v = ((pm.response.json() || {}).data || [])[0];",
+                  "pm.test('veículo {{placa}} na integração', () => pm.expect(v).to.be.an('object'));",
+                  "if (v) {",
+                  "  const pagamento = v.pagamentos.find((x) => x.referenciaExterna === pm.collectionVariables.get('refPagamento')) || {};",
+                  "  pm.test('pagamento Pago no veículo', () => pm.expect(pagamento.situacao).to.eql('Pago'));",
+                  "  pm.test('da reserva ' + pm.collectionVariables.get('refReservaPagamento'), () => pm.expect(pagamento.referenciaExternaReserva).to.eql(pm.collectionVariables.get('refReservaPagamento')));",
+                  "  console.log(v);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles?placa={{placa}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles"
+              ],
+              "query": [
+                {
+                  "key": "placa",
+                  "value": "{{placa}}"
+                }
+              ]
+            },
+            "description": "O pagamento aparece no veículo, com a reserva paga."
+          },
+          "response": []
+        },
+        {
+          "name": "4.8 Integração - reserva continua ativa",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const r = (pm.response.json() || {}).data || {};",
+                  "pm.test('reserva Ativa com o veículo {{placa}}', () => {",
+                  "  pm.expect(r.situacao).to.eql('Ativa');",
+                  "  pm.expect(r.veiculo.placa).to.eql(pm.collectionVariables.get('placa'));",
+                  "  pm.expect(r.operacaoPendente).to.be.undefined;",
+                  "});",
+                  "console.log(r);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/{{refReservaPagamento}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "{{refReservaPagamento}}"
+              ]
+            },
+            "description": "Esperado: situação `Ativa`, com o veículo associado."
+          },
+          "response": []
+        },
+        {
+          "name": "4.9 Integração - cancelar pagamento",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "pm.test('operação registrada e enviada ao Locavia', () => pm.expect(d.operationId).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('operationId', d.operationId);",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/{{refPagamento}}/cancellation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "{{refPagamento}}",
+                "cancellation"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo\": \"Estorno do sinal (teste)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.10 Integração - operação de cancelamento do pagamento",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando o Locavia processar (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message + (d.lastError.detail ? ' (' + d.lastError.detail + ')' : '') : '';",
+                  "  pm.test('PAYMENT_CANCEL FINISHED (atual: ' + d.status + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('PAYMENT_CANCEL');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "Operação assíncrona `PAYMENT_CANCEL`: espera o Locavia processar pela fila e a integração aplicar o resultado e avisar a Só Estoque. Esperado: `FINISHED`."
+          },
+          "response": []
+        },
+        {
+          "name": "4.11 Integração - pagamento cancelado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const g = (pm.response.json() || {}).data || {};",
+                  "pm.test('pagamento Cancelado com o motivo', () => { pm.expect(g.situacao).to.eql('Cancelado'); pm.expect(g.motivo).to.eql('Estorno do sinal (teste)'); pm.expect(g.dataCancelamento).to.be.a('string'); });",
+                  "console.log(g);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/{{refPagamento}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "{{refPagamento}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.12 Só Estoque (mock) - pagamento cancelado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const entregas = (pm.response.json() || []).filter((e) => e.externalReference === pm.collectionVariables.get('refPagamento') && e.event === 'payment.cancel');",
+                  "const e = entregas[entregas.length - 1];",
+                  "const pronto = !!e;",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando a entrega à Só Estoque (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  pm.test('payment.cancel entregue à Só Estoque', () => pm.expect(e, 'não entregue').to.be.an('object'));",
+                  "  if (e) {",
+                  "    pm.test('sucesso', () => pm.expect(e.success).to.eql(true));",
+                  "    console.log(e);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{soEstoqueMockUrl}}/payment-notifications",
+              "host": [
+                "{{soEstoqueMockUrl}}"
+              ],
+              "path": [
+                "payment-notifications"
+              ]
+            },
+            "description": "Webhook da Só Estoque (json-server do docker-compose da integração). Esperado: evento `payment.cancel` com sucesso."
+          },
+          "response": []
+        },
+        {
+          "name": "4.13 Integração - cancelar a reserva (libera o veículo)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "pm.test('operação registrada e enviada ao Locavia', () => pm.expect(d.operationId).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('operationId', d.operationId);",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/{{refReservaPagamento}}/cancellation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "{{refReservaPagamento}}",
+                "cancellation"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo\": \"Fim do teste de pagamento\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.14 Integração - operação de cancelamento da reserva",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const d = (pm.response.json() || {}).data || {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando o Locavia processar (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message + (d.lastError.detail ? ' (' + d.lastError.detail + ')' : '') : '';",
+                  "  pm.test('RESERVATION_CANCEL FINISHED (atual: ' + d.status + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('RESERVATION_CANCEL');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "Operação assíncrona `RESERVATION_CANCEL`: espera o Locavia processar pela fila e a integração aplicar o resultado e avisar a Só Estoque. Esperado: `FINISHED`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5 - Validações",
+      "description": "Respostas de erro dos dois lados; não alteram o fluxo.",
+      "item": [
+        {
+          "name": "Locavia - 401 sem token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.expect(pm.response.code).to.eql(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/desmobilizacoes-integracao-gerenciador",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "desmobilizacoes-integracao-gerenciador"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"page\": 1,\n  \"limit\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Locavia - 400 disponibilizar sem desmobilização",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.expect(pm.response.code).to.eql(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/desmobilizacoes-integracao-gerenciador/disponibilizacao",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "desmobilizacoes-integracao-gerenciador",
+                "disponibilizacao"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"CodigoDesmobilizacao\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Locavia - desmobilização inexistente não é publicada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('Sucesso false', () => pm.expect((((pm.response.json() || {}).data || [])[0] || {}).Sucesso).to.eql(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/desmobilizacoes-integracao-gerenciador/disponibilizacao",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "desmobilizacoes-integracao-gerenciador",
+                "disponibilizacao"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"CodigoDesmobilizacao\": [\n    999999999\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 401 sem token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.expect(pm.response.code).to.eql(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 401 credencial inválida",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.expect(pm.response.code).to.eql(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"invalido\",\n  \"clientSecret\": \"invalido\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 400 situação inválida",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.expect(pm.response.code).to.eql(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles?situacao=Vendida",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles"
+              ],
+              "query": [
+                {
+                  "key": "situacao",
+                  "value": "Vendida"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 404 reserva de placa sem desmobilização",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.expect(pm.response.code).to.eql(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"referenciaExterna\": \"SE-RES-404\",\n  \"placa\": \"ZZZ9Z99\",\n  \"dataExpiracao\": \"2099-01-01T00:00:00.000Z\",\n  \"cliente\": {\n    \"tipoPessoa\": \"Fisica\",\n    \"documento\": \"{{cpfCliente}}\",\n    \"nome\": \"Cliente Teste So Estoque\",\n    \"email\": \"cliente.teste@email.com\",\n    \"telefone\": \"11988887777\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 400 reserva sem cliente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.expect(pm.response.code).to.eql(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"referenciaExterna\": \"SE-RES-400\",\n  \"placa\": \"{{placa}}\",\n  \"dataExpiracao\": \"2099-01-01T00:00:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 404 reserva inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.expect(pm.response.code).to.eql(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/SE-RES-INEXISTENTE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "SE-RES-INEXISTENTE"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 404 pagamento inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.expect(pm.response.code).to.eql(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/SE-PAG-INEXISTENTE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "SE-PAG-INEXISTENTE"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 404 cancelar pagamento inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.expect(pm.response.code).to.eql(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/SE-PAG-INEXISTENTE/cancellation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "SE-PAG-INEXISTENTE",
+                "cancellation"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 404 operação inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.expect(pm.response.code).to.eql(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservations/operations/00000000-0000-0000-0000-000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservations",
+                "operations",
+                "00000000-0000-0000-0000-000000000000"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6 - Situação das filas",
+      "description": "Quantas mensagens estão esperando, em processamento e na DLQ em cada fila do LocalStack (`sqsUrl`). Use quando um passo ficar esperando: mensagem esperando = consumidor parado (Locavia ou integração fora do ar ou com o `.env` errado); em processamento por muito tempo = falha e nova tentativa (veja o log); na DLQ = falhou 5 vezes (o corpo aparece no console).",
+      "item": [
+        {
+          "name": "Desmobilizações (Locavia → integração)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const a = (pm.response.json() || {}).Attributes || {};",
+                  "pm.test('lw-integracao-desmobilizacao-so-estoque: ' + a.ApproximateNumberOfMessages + ' esperando, ' + a.ApproximateNumberOfMessagesNotVisible + ' em processamento', () => true);",
+                  "const sqs = (acao, corpo) => ({ url: pm.collectionVariables.get('sqsUrl') + '/', method: 'POST', header: { 'Content-Type': 'application/x-amz-json-1.0', 'X-Amz-Target': 'AmazonSQS.' + acao }, body: { mode: 'raw', raw: JSON.stringify(corpo) } });",
+                  "const dlq = pm.collectionVariables.get('sqsUrl') + '/000000000000/lw-integracao-desmobilizacao-so-estoque-dlq';",
+                  "pm.sendRequest(sqs('GetQueueAttributes', { QueueUrl: dlq, AttributeNames: ['ApproximateNumberOfMessages'] }), (erro, resposta) => {",
+                  "  const n = Number((((resposta && resposta.json()) || {}).Attributes || {}).ApproximateNumberOfMessages || 0);",
+                  "  pm.test('DLQ lw-integracao-desmobilizacao-so-estoque-dlq: ' + n + ' mensagem(ns)' + (n ? ' - veja o corpo no console' : ''), () => pm.expect(n).to.eql(0));",
+                  "  if (n) {",
+                  "    pm.sendRequest(sqs('ReceiveMessage', { QueueUrl: dlq, MaxNumberOfMessages: 10, VisibilityTimeout: 0 }), (e, r) => {",
+                  "      (((r && r.json()) || {}).Messages || []).forEach((m) => { try { console.log(JSON.parse(m.Body)); } catch (x) { console.log(m.Body); } });",
+                  "    });",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-amz-json-1.0",
+                "type": "text"
+              },
+              {
+                "key": "X-Amz-Target",
+                "value": "AmazonSQS.GetQueueAttributes",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{sqsUrl}}/",
+              "host": [
+                "{{sqsUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Consumida pela integração.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"QueueUrl\":\"{{sqsUrl}}/000000000000/lw-integracao-desmobilizacao-so-estoque\",\"AttributeNames\":[\"ApproximateNumberOfMessages\",\"ApproximateNumberOfMessagesNotVisible\"]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Operações de reserva (integração → Locavia)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const a = (pm.response.json() || {}).Attributes || {};",
+                  "pm.test('lw-integracao-reserva-so-estoque: ' + a.ApproximateNumberOfMessages + ' esperando, ' + a.ApproximateNumberOfMessagesNotVisible + ' em processamento', () => true);",
+                  "const sqs = (acao, corpo) => ({ url: pm.collectionVariables.get('sqsUrl') + '/', method: 'POST', header: { 'Content-Type': 'application/x-amz-json-1.0', 'X-Amz-Target': 'AmazonSQS.' + acao }, body: { mode: 'raw', raw: JSON.stringify(corpo) } });",
+                  "const dlq = pm.collectionVariables.get('sqsUrl') + '/000000000000/lw-integracao-reserva-so-estoque-dlq';",
+                  "pm.sendRequest(sqs('GetQueueAttributes', { QueueUrl: dlq, AttributeNames: ['ApproximateNumberOfMessages'] }), (erro, resposta) => {",
+                  "  const n = Number((((resposta && resposta.json()) || {}).Attributes || {}).ApproximateNumberOfMessages || 0);",
+                  "  pm.test('DLQ lw-integracao-reserva-so-estoque-dlq: ' + n + ' mensagem(ns)' + (n ? ' - veja o corpo no console' : ''), () => pm.expect(n).to.eql(0));",
+                  "  if (n) {",
+                  "    pm.sendRequest(sqs('ReceiveMessage', { QueueUrl: dlq, MaxNumberOfMessages: 10, VisibilityTimeout: 0 }), (e, r) => {",
+                  "      (((r && r.json()) || {}).Messages || []).forEach((m) => { try { console.log(JSON.parse(m.Body)); } catch (x) { console.log(m.Body); } });",
+                  "    });",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-amz-json-1.0",
+                "type": "text"
+              },
+              {
+                "key": "X-Amz-Target",
+                "value": "AmazonSQS.GetQueueAttributes",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{sqsUrl}}/",
+              "host": [
+                "{{sqsUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Consumida pelo Locavia.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"QueueUrl\":\"{{sqsUrl}}/000000000000/lw-integracao-reserva-so-estoque\",\"AttributeNames\":[\"ApproximateNumberOfMessages\",\"ApproximateNumberOfMessagesNotVisible\"]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resultado das reservas (Locavia → integração)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const a = (pm.response.json() || {}).Attributes || {};",
+                  "pm.test('lw-integracao-reserva-so-estoque-retorno: ' + a.ApproximateNumberOfMessages + ' esperando, ' + a.ApproximateNumberOfMessagesNotVisible + ' em processamento', () => true);",
+                  "const sqs = (acao, corpo) => ({ url: pm.collectionVariables.get('sqsUrl') + '/', method: 'POST', header: { 'Content-Type': 'application/x-amz-json-1.0', 'X-Amz-Target': 'AmazonSQS.' + acao }, body: { mode: 'raw', raw: JSON.stringify(corpo) } });",
+                  "const dlq = pm.collectionVariables.get('sqsUrl') + '/000000000000/lw-integracao-reserva-so-estoque-retorno-dlq';",
+                  "pm.sendRequest(sqs('GetQueueAttributes', { QueueUrl: dlq, AttributeNames: ['ApproximateNumberOfMessages'] }), (erro, resposta) => {",
+                  "  const n = Number((((resposta && resposta.json()) || {}).Attributes || {}).ApproximateNumberOfMessages || 0);",
+                  "  pm.test('DLQ lw-integracao-reserva-so-estoque-retorno-dlq: ' + n + ' mensagem(ns)' + (n ? ' - veja o corpo no console' : ''), () => pm.expect(n).to.eql(0));",
+                  "  if (n) {",
+                  "    pm.sendRequest(sqs('ReceiveMessage', { QueueUrl: dlq, MaxNumberOfMessages: 10, VisibilityTimeout: 0 }), (e, r) => {",
+                  "      (((r && r.json()) || {}).Messages || []).forEach((m) => { try { console.log(JSON.parse(m.Body)); } catch (x) { console.log(m.Body); } });",
+                  "    });",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-amz-json-1.0",
+                "type": "text"
+              },
+              {
+                "key": "X-Amz-Target",
+                "value": "AmazonSQS.GetQueueAttributes",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{sqsUrl}}/",
+              "host": [
+                "{{sqsUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Consumida pela integração.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"QueueUrl\":\"{{sqsUrl}}/000000000000/lw-integracao-reserva-so-estoque-retorno\",\"AttributeNames\":[\"ApproximateNumberOfMessages\",\"ApproximateNumberOfMessagesNotVisible\"]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Operações de pagamento (integração → Locavia)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const a = (pm.response.json() || {}).Attributes || {};",
+                  "pm.test('locaviaweb-integracao-pagamento-so-estoque: ' + a.ApproximateNumberOfMessages + ' esperando, ' + a.ApproximateNumberOfMessagesNotVisible + ' em processamento', () => true);",
+                  "const sqs = (acao, corpo) => ({ url: pm.collectionVariables.get('sqsUrl') + '/', method: 'POST', header: { 'Content-Type': 'application/x-amz-json-1.0', 'X-Amz-Target': 'AmazonSQS.' + acao }, body: { mode: 'raw', raw: JSON.stringify(corpo) } });",
+                  "const dlq = pm.collectionVariables.get('sqsUrl') + '/000000000000/locaviaweb-integracao-pagamento-so-estoque-dlq';",
+                  "pm.sendRequest(sqs('GetQueueAttributes', { QueueUrl: dlq, AttributeNames: ['ApproximateNumberOfMessages'] }), (erro, resposta) => {",
+                  "  const n = Number((((resposta && resposta.json()) || {}).Attributes || {}).ApproximateNumberOfMessages || 0);",
+                  "  pm.test('DLQ locaviaweb-integracao-pagamento-so-estoque-dlq: ' + n + ' mensagem(ns)' + (n ? ' - veja o corpo no console' : ''), () => pm.expect(n).to.eql(0));",
+                  "  if (n) {",
+                  "    pm.sendRequest(sqs('ReceiveMessage', { QueueUrl: dlq, MaxNumberOfMessages: 10, VisibilityTimeout: 0 }), (e, r) => {",
+                  "      (((r && r.json()) || {}).Messages || []).forEach((m) => { try { console.log(JSON.parse(m.Body)); } catch (x) { console.log(m.Body); } });",
+                  "    });",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-amz-json-1.0",
+                "type": "text"
+              },
+              {
+                "key": "X-Amz-Target",
+                "value": "AmazonSQS.GetQueueAttributes",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{sqsUrl}}/",
+              "host": [
+                "{{sqsUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Consumida pelo Locavia.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"QueueUrl\":\"{{sqsUrl}}/000000000000/locaviaweb-integracao-pagamento-so-estoque\",\"AttributeNames\":[\"ApproximateNumberOfMessages\",\"ApproximateNumberOfMessagesNotVisible\"]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resultado dos pagamentos (Locavia → integração)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const a = (pm.response.json() || {}).Attributes || {};",
+                  "pm.test('locaviaweb-integracao-pagamento-so-estoque-retorno: ' + a.ApproximateNumberOfMessages + ' esperando, ' + a.ApproximateNumberOfMessagesNotVisible + ' em processamento', () => true);",
+                  "const sqs = (acao, corpo) => ({ url: pm.collectionVariables.get('sqsUrl') + '/', method: 'POST', header: { 'Content-Type': 'application/x-amz-json-1.0', 'X-Amz-Target': 'AmazonSQS.' + acao }, body: { mode: 'raw', raw: JSON.stringify(corpo) } });",
+                  "const dlq = pm.collectionVariables.get('sqsUrl') + '/000000000000/locaviaweb-integracao-pagamento-so-estoque-retorno-dlq';",
+                  "pm.sendRequest(sqs('GetQueueAttributes', { QueueUrl: dlq, AttributeNames: ['ApproximateNumberOfMessages'] }), (erro, resposta) => {",
+                  "  const n = Number((((resposta && resposta.json()) || {}).Attributes || {}).ApproximateNumberOfMessages || 0);",
+                  "  pm.test('DLQ locaviaweb-integracao-pagamento-so-estoque-retorno-dlq: ' + n + ' mensagem(ns)' + (n ? ' - veja o corpo no console' : ''), () => pm.expect(n).to.eql(0));",
+                  "  if (n) {",
+                  "    pm.sendRequest(sqs('ReceiveMessage', { QueueUrl: dlq, MaxNumberOfMessages: 10, VisibilityTimeout: 0 }), (e, r) => {",
+                  "      (((r && r.json()) || {}).Messages || []).forEach((m) => { try { console.log(JSON.parse(m.Body)); } catch (x) { console.log(m.Body); } });",
+                  "    });",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-amz-json-1.0",
+                "type": "text"
+              },
+              {
+                "key": "X-Amz-Target",
+                "value": "AmazonSQS.GetQueueAttributes",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{sqsUrl}}/",
+              "host": [
+                "{{sqsUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Consumida pela integração.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"QueueUrl\":\"{{sqsUrl}}/000000000000/locaviaweb-integracao-pagamento-so-estoque-retorno\",\"AttributeNames\":[\"ApproximateNumberOfMessages\",\"ApproximateNumberOfMessagesNotVisible\"]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "locaviaUrl",
+      "value": "http://localhost:3333/api-locaviaweb/v1",
+      "type": "string",
+      "description": "api-locavia-web-ts"
+    },
+    {
+      "key": "locaviaLogin",
+      "value": "Suporte",
+      "type": "string"
+    },
+    {
+      "key": "locaviaSenha",
+      "value": "dmaloc",
+      "type": "string",
+      "description": "Senha do usuário do Locavia (LOCAVIA_WEB_PASSWORD do .env local da integração)"
+    },
+    {
+      "key": "locaviaOrganizacao",
+      "value": "07777542000114",
+      "type": "string",
+      "description": "CNPJ da organização"
+    },
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001/car-inventory/v1",
+      "type": "string",
+      "description": "api-locaviaweb-car-inventory"
+    },
+    {
+      "key": "clientId",
+      "value": "so-estoque",
+      "type": "string",
+      "description": "AUTH_CLIENT_ID do .env da integração"
+    },
+    {
+      "key": "clientSecret",
+      "value": "70Rc5dJF8VXw0V_rfwd_Zilv-Oyu4f2e",
+      "type": "string",
+      "description": "AUTH_CLIENT_SECRET do .env local da integração"
+    },
+    {
+      "key": "soEstoqueMockUrl",
+      "value": "http://localhost:3020",
+      "type": "string",
+      "description": "Mock da Só Estoque (docker-compose da integração)"
+    },
+    {
+      "key": "sqsUrl",
+      "value": "http://localhost:4567",
+      "type": "string",
+      "description": "LocalStack da integração, usado também pelo Locavia"
+    },
+    {
+      "key": "codigoVeiculo",
+      "value": "",
+      "type": "string",
+      "description": "Opcional: veículo do teste; vazio = primeira desmobilização disponível"
+    },
+    {
+      "key": "cpfCliente",
+      "value": "52998224725",
+      "type": "string",
+      "description": "Cliente das reservas; 2.1 troca por um CPF novo a cada execução (cliente cadastrado como lojista pelo Locavia)"
+    },
+    {
+      "key": "codigoCliente",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 2.3"
+    },
+    {
+      "key": "locaviaToken",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 0 - Preparação"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 0 - Preparação"
+    },
+    {
+      "key": "codigoDesmobilizacao",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 1.1"
+    },
+    {
+      "key": "placa",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 1.1"
+    },
+    {
+      "key": "filtroDesmobilizacoes",
+      "value": "",
+      "type": "string",
+      "description": "Montado por 1.1"
+    },
+    {
+      "key": "refReserva",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 2.1"
+    },
+    {
+      "key": "refDuplicada",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 2.3a"
+    },
+    {
+      "key": "codigoReserva",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 2.2"
+    },
+    {
+      "key": "refReservaRetirada",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 3.1"
+    },
+    {
+      "key": "refReservaPagamento",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 4.1"
+    },
+    {
+      "key": "refPagamento",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 4.3"
+    },
+    {
+      "key": "codigoPagamento",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 4.4"
+    },
+    {
+      "key": "dataExpiracao",
+      "value": "",
+      "type": "string",
+      "description": "Montado na reserva"
+    },
+    {
+      "key": "dataPagamento",
+      "value": "",
+      "type": "string",
+      "description": "Montado no pagamento"
+    },
+    {
+      "key": "operationId",
+      "value": "",
+      "type": "string",
+      "description": "Última operação assíncrona"
+    },
+    {
+      "key": "tentativas",
+      "value": "0",
+      "type": "string",
+      "description": "Controle das consultas repetidas"
+    }
+  ]
+}
