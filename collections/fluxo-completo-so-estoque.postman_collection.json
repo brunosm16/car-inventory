@@ -44,7 +44,7 @@
           "function veiculoLivre() {",
           "  const novaReserva = nome.includes('reservar');",
           "  if (!usa('placa') || (v('placa') && !novaReserva)) return;",
-          "  pm.sendRequest(pedido('GET', v('baseUrl') + '/vehicles?situacao=Aberta&limit=50', null, { 'x-api-key': v('token') }), (e, r) => {",
+          "  pm.sendRequest(pedido('GET', v('baseUrl') + '/vehicles?situacao=ABERTA&limit=50', null, { 'x-api-key': v('token') }), (e, r) => {",
           "    const lista = Array.isArray(json(r).data) ? json(r).data : [];",
           "    const semReserva = (x) => !(x.mensagem || {}).dadosReserva && !(x.reservas || []).some((y) => ['Ativa', 'Pendente'].includes(y.situacao));",
           "    const atual = lista.find((x) => x.placa === v('placa'));",
@@ -194,7 +194,7 @@
     },
     {
       "name": "1 - Desmobilização",
-      "description": "Locavia → fila `lw-integracao-desmobilizacao-so-estoque` → integração (DynamoDB) → Só Estoque.",
+      "description": "Locavia → fila `locaviaweb-integracao-desmobilizacao-so-estoque` → integração (DynamoDB) → Só Estoque.",
       "item": [
         {
           "name": "1.1 Locavia - recuperar veículos disponíveis para venda",
@@ -384,7 +384,7 @@
                   "pm.test('veículo {{placa}} na integração', () => pm.expect(v).to.be.an('object'));",
                   "if (v) {",
                   "  pm.test('situação, desmobilização e manutenção', () => {",
-                  "    pm.expect(['Aberta', 'Fechada', 'Cancelada']).to.include(v.situacao);",
+                  "    pm.expect(['ABERTA', 'FECHADA', 'CANCELADA']).to.include(v.situacao);",
                   "    pm.expect(v.mensagem.dadosDesmobilizacao.codigoDesmobilizacao).to.eql(pm.collectionVariables.get('codigoDesmobilizacao'));",
                   "    pm.expect(v.mensagem.dadosManutencao.ordensServico).to.be.an('array');",
                   "    pm.expect(v.reservas).to.be.an('array');",
@@ -428,7 +428,7 @@
     },
     {
       "name": "2 - Reserva: criar, atualizar e cancelar",
-      "description": "Integração → fila `lw-integracao-reserva-so-estoque` → Locavia → `-retorno` → integração → Só Estoque. A reserva é feita com um cliente novo (CPF gerado a cada execução), que o Locavia cadastra como lojista.",
+      "description": "Integração → fila `locaviaweb-integracao-reserva-so-estoque` → Locavia → `-retorno` → integração → Só Estoque. A reserva é feita com um cliente novo (CPF gerado a cada execução), que o Locavia cadastra como lojista.",
       "item": [
         {
           "name": "2.1 Só Estoque - reservar com cliente que não existe no Locavia",
@@ -1378,7 +1378,7 @@
                 "reservations"
               ]
             },
-            "description": "Reserva feita na Só Estoque: a integração grava pendente e publica `reserva.criar` em `lw-integracao-reserva-so-estoque`.",
+            "description": "Reserva feita na Só Estoque: a integração grava pendente e publica `reserva.criar` em `locaviaweb-integracao-reserva-so-estoque`.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"referenciaExterna\": \"{{refReservaRetirada}}\",\n  \"placa\": \"{{placa}}\",\n  \"dataExpiracao\": \"{{dataExpiracao}}\",\n  \"valorAcordado\": 70000,\n  \"cliente\": {\n    \"tipoPessoa\": \"Fisica\",\n    \"documento\": \"{{cpfCliente}}\",\n    \"nome\": \"Cliente Teste So Estoque\",\n    \"email\": \"cliente.teste@email.com\",\n    \"telefone\": \"11988887777\"\n  }\n}",
@@ -1763,7 +1763,7 @@
                 "reservations"
               ]
             },
-            "description": "Reserva feita na Só Estoque: a integração grava pendente e publica `reserva.criar` em `lw-integracao-reserva-so-estoque`.",
+            "description": "Reserva feita na Só Estoque: a integração grava pendente e publica `reserva.criar` em `locaviaweb-integracao-reserva-so-estoque`.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"referenciaExterna\": \"{{refReservaPagamento}}\",\n  \"placa\": \"{{placa}}\",\n  \"dataExpiracao\": \"{{dataExpiracao}}\",\n  \"valorAcordado\": 70000,\n  \"cliente\": {\n    \"tipoPessoa\": \"Fisica\",\n    \"documento\": \"{{cpfCliente}}\",\n    \"nome\": \"Cliente Teste So Estoque\",\n    \"email\": \"cliente.teste@email.com\",\n    \"telefone\": \"11988887777\"\n  }\n}",
@@ -2989,12 +2989,12 @@
                 "exec": [
                   "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const a = (pm.response.json() || {}).Attributes || {};",
-                  "pm.test('lw-integracao-desmobilizacao-so-estoque: ' + a.ApproximateNumberOfMessages + ' esperando, ' + a.ApproximateNumberOfMessagesNotVisible + ' em processamento', () => true);",
+                  "pm.test('locaviaweb-integracao-desmobilizacao-so-estoque: ' + a.ApproximateNumberOfMessages + ' esperando, ' + a.ApproximateNumberOfMessagesNotVisible + ' em processamento', () => true);",
                   "const sqs = (acao, corpo) => ({ url: pm.collectionVariables.get('sqsUrl') + '/', method: 'POST', header: { 'Content-Type': 'application/x-amz-json-1.0', 'X-Amz-Target': 'AmazonSQS.' + acao }, body: { mode: 'raw', raw: JSON.stringify(corpo) } });",
-                  "const dlq = pm.collectionVariables.get('sqsUrl') + '/000000000000/lw-integracao-desmobilizacao-so-estoque-dlq';",
+                  "const dlq = pm.collectionVariables.get('sqsUrl') + '/000000000000/locaviaweb-integracao-desmobilizacao-so-estoque-dlq';",
                   "pm.sendRequest(sqs('GetQueueAttributes', { QueueUrl: dlq, AttributeNames: ['ApproximateNumberOfMessages'] }), (erro, resposta) => {",
                   "  const n = Number((((resposta && resposta.json()) || {}).Attributes || {}).ApproximateNumberOfMessages || 0);",
-                  "  pm.test('DLQ lw-integracao-desmobilizacao-so-estoque-dlq: ' + n + ' mensagem(ns)' + (n ? ' - veja o corpo no console' : ''), () => pm.expect(n).to.eql(0));",
+                  "  pm.test('DLQ locaviaweb-integracao-desmobilizacao-so-estoque-dlq: ' + n + ' mensagem(ns)' + (n ? ' - veja o corpo no console' : ''), () => pm.expect(n).to.eql(0));",
                   "  if (n) {",
                   "    pm.sendRequest(sqs('ReceiveMessage', { QueueUrl: dlq, MaxNumberOfMessages: 10, VisibilityTimeout: 0 }), (e, r) => {",
                   "      (((r && r.json()) || {}).Messages || []).forEach((m) => { try { console.log(JSON.parse(m.Body)); } catch (x) { console.log(m.Body); } });",
@@ -3031,7 +3031,7 @@
             "description": "Consumida pela integração.",
             "body": {
               "mode": "raw",
-              "raw": "{\"QueueUrl\":\"{{sqsUrl}}/000000000000/lw-integracao-desmobilizacao-so-estoque\",\"AttributeNames\":[\"ApproximateNumberOfMessages\",\"ApproximateNumberOfMessagesNotVisible\"]}",
+              "raw": "{\"QueueUrl\":\"{{sqsUrl}}/000000000000/locaviaweb-integracao-desmobilizacao-so-estoque\",\"AttributeNames\":[\"ApproximateNumberOfMessages\",\"ApproximateNumberOfMessagesNotVisible\"]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3051,12 +3051,12 @@
                 "exec": [
                   "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const a = (pm.response.json() || {}).Attributes || {};",
-                  "pm.test('lw-integracao-reserva-so-estoque: ' + a.ApproximateNumberOfMessages + ' esperando, ' + a.ApproximateNumberOfMessagesNotVisible + ' em processamento', () => true);",
+                  "pm.test('locaviaweb-integracao-reserva-so-estoque: ' + a.ApproximateNumberOfMessages + ' esperando, ' + a.ApproximateNumberOfMessagesNotVisible + ' em processamento', () => true);",
                   "const sqs = (acao, corpo) => ({ url: pm.collectionVariables.get('sqsUrl') + '/', method: 'POST', header: { 'Content-Type': 'application/x-amz-json-1.0', 'X-Amz-Target': 'AmazonSQS.' + acao }, body: { mode: 'raw', raw: JSON.stringify(corpo) } });",
-                  "const dlq = pm.collectionVariables.get('sqsUrl') + '/000000000000/lw-integracao-reserva-so-estoque-dlq';",
+                  "const dlq = pm.collectionVariables.get('sqsUrl') + '/000000000000/locaviaweb-integracao-reserva-so-estoque-dlq';",
                   "pm.sendRequest(sqs('GetQueueAttributes', { QueueUrl: dlq, AttributeNames: ['ApproximateNumberOfMessages'] }), (erro, resposta) => {",
                   "  const n = Number((((resposta && resposta.json()) || {}).Attributes || {}).ApproximateNumberOfMessages || 0);",
-                  "  pm.test('DLQ lw-integracao-reserva-so-estoque-dlq: ' + n + ' mensagem(ns)' + (n ? ' - veja o corpo no console' : ''), () => pm.expect(n).to.eql(0));",
+                  "  pm.test('DLQ locaviaweb-integracao-reserva-so-estoque-dlq: ' + n + ' mensagem(ns)' + (n ? ' - veja o corpo no console' : ''), () => pm.expect(n).to.eql(0));",
                   "  if (n) {",
                   "    pm.sendRequest(sqs('ReceiveMessage', { QueueUrl: dlq, MaxNumberOfMessages: 10, VisibilityTimeout: 0 }), (e, r) => {",
                   "      (((r && r.json()) || {}).Messages || []).forEach((m) => { try { console.log(JSON.parse(m.Body)); } catch (x) { console.log(m.Body); } });",
@@ -3093,7 +3093,7 @@
             "description": "Consumida pelo Locavia.",
             "body": {
               "mode": "raw",
-              "raw": "{\"QueueUrl\":\"{{sqsUrl}}/000000000000/lw-integracao-reserva-so-estoque\",\"AttributeNames\":[\"ApproximateNumberOfMessages\",\"ApproximateNumberOfMessagesNotVisible\"]}",
+              "raw": "{\"QueueUrl\":\"{{sqsUrl}}/000000000000/locaviaweb-integracao-reserva-so-estoque\",\"AttributeNames\":[\"ApproximateNumberOfMessages\",\"ApproximateNumberOfMessagesNotVisible\"]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3113,12 +3113,12 @@
                 "exec": [
                   "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const a = (pm.response.json() || {}).Attributes || {};",
-                  "pm.test('lw-integracao-reserva-so-estoque-retorno: ' + a.ApproximateNumberOfMessages + ' esperando, ' + a.ApproximateNumberOfMessagesNotVisible + ' em processamento', () => true);",
+                  "pm.test('locaviaweb-integracao-reserva-so-estoque-retorno: ' + a.ApproximateNumberOfMessages + ' esperando, ' + a.ApproximateNumberOfMessagesNotVisible + ' em processamento', () => true);",
                   "const sqs = (acao, corpo) => ({ url: pm.collectionVariables.get('sqsUrl') + '/', method: 'POST', header: { 'Content-Type': 'application/x-amz-json-1.0', 'X-Amz-Target': 'AmazonSQS.' + acao }, body: { mode: 'raw', raw: JSON.stringify(corpo) } });",
-                  "const dlq = pm.collectionVariables.get('sqsUrl') + '/000000000000/lw-integracao-reserva-so-estoque-retorno-dlq';",
+                  "const dlq = pm.collectionVariables.get('sqsUrl') + '/000000000000/locaviaweb-integracao-reserva-so-estoque-retorno-dlq';",
                   "pm.sendRequest(sqs('GetQueueAttributes', { QueueUrl: dlq, AttributeNames: ['ApproximateNumberOfMessages'] }), (erro, resposta) => {",
                   "  const n = Number((((resposta && resposta.json()) || {}).Attributes || {}).ApproximateNumberOfMessages || 0);",
-                  "  pm.test('DLQ lw-integracao-reserva-so-estoque-retorno-dlq: ' + n + ' mensagem(ns)' + (n ? ' - veja o corpo no console' : ''), () => pm.expect(n).to.eql(0));",
+                  "  pm.test('DLQ locaviaweb-integracao-reserva-so-estoque-retorno-dlq: ' + n + ' mensagem(ns)' + (n ? ' - veja o corpo no console' : ''), () => pm.expect(n).to.eql(0));",
                   "  if (n) {",
                   "    pm.sendRequest(sqs('ReceiveMessage', { QueueUrl: dlq, MaxNumberOfMessages: 10, VisibilityTimeout: 0 }), (e, r) => {",
                   "      (((r && r.json()) || {}).Messages || []).forEach((m) => { try { console.log(JSON.parse(m.Body)); } catch (x) { console.log(m.Body); } });",
@@ -3155,7 +3155,7 @@
             "description": "Consumida pela integração.",
             "body": {
               "mode": "raw",
-              "raw": "{\"QueueUrl\":\"{{sqsUrl}}/000000000000/lw-integracao-reserva-so-estoque-retorno\",\"AttributeNames\":[\"ApproximateNumberOfMessages\",\"ApproximateNumberOfMessagesNotVisible\"]}",
+              "raw": "{\"QueueUrl\":\"{{sqsUrl}}/000000000000/locaviaweb-integracao-reserva-so-estoque-retorno\",\"AttributeNames\":[\"ApproximateNumberOfMessages\",\"ApproximateNumberOfMessagesNotVisible\"]}",
               "options": {
                 "raw": {
                   "language": "json"

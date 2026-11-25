@@ -65,7 +65,7 @@ Já existe uma camada para auditar, porém preciso da garantia de todas as regra
 ■	resultado.requisicao e resultado.resposta guardam o que foi enviado à plataforma e o que ela devolveu; resultado.publicacao só é preenchido nas operações de ENTRADA.
 ■	Uma desmobilização CANCELADA cancela a operação de envio ainda PENDENTE do mesmo veículo, registrando o vínculo em cancelamento.operacaoId.
 
-#### Chaves Sugeridas do DynamoDB
+#### Chaves Sugeridas do DynamoDB ☑️
 
 O banco do DynamoDB já está devidamente modelado porém temos chaves sugeridas do DynamoDB, mais uma vez faça apenas o que é extremamente necessário, evite ao máximo mudanças bruscas no que foi implementado, implemente apenas o necessário. 
 

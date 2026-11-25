@@ -6,15 +6,21 @@ Recursos de cada ambiente para o fluxo api-locavia-web-ts ↔ api-locaviaweb-car
 
 Filas Standard, cada uma com sua própria DLQ `<fila>-dlq`.
 
-1. `lw-integracao-desmobilizacao-so-estoque` → api-locavia-web-ts publica / api-locaviaweb-car-inventory consome
-2. `lw-integracao-reserva-so-estoque` → api-locaviaweb-car-inventory publica / api-locavia-web-ts consome
-3. `lw-integracao-reserva-so-estoque-retorno` → api-locavia-web-ts publica / api-locaviaweb-car-inventory consome
+1. `locaviaweb-integracao-desmobilizacao-so-estoque` → api-locavia-web-ts publica / api-locaviaweb-car-inventory consome
+2. `locaviaweb-integracao-reserva-so-estoque` → api-locaviaweb-car-inventory publica / api-locavia-web-ts consome
+3. `locaviaweb-integracao-reserva-so-estoque-retorno` → api-locavia-web-ts publica / api-locaviaweb-car-inventory consome
 4. `locaviaweb-integracao-pagamento-so-estoque` → api-locaviaweb-car-inventory publica / api-locavia-web-ts consome
 5. `locaviaweb-integracao-pagamento-so-estoque-retorno` → api-locavia-web-ts publica / api-locaviaweb-car-inventory consome
 
 ## Tabelas DynamoDB
 
-6. `car-inventory-async-operations` (índices `idempotencyKey-index` e `externalCode-index`, TTL em `expiresAt`) → api-locaviaweb-car-inventory
+6. `car-inventory-async-operations` → api-locaviaweb-car-inventory
+   - Chave `operationId` (S).
+   - Índices `idempotencyKey-index` e `externalCode-index`, ambos com SK `createdAt` (S).
+   - `vehicleId-index`: `vehicleId` (N) + `createdAt` (S).
+   - `organizationId-index`: `organizationId` (S) + `createdAt` (S).
+   - `status-nextAttemptAt-index`: `status` (S) + `nextAttemptAt` (S). É um índice esparso: só entram as operações aguardando nova tentativa.
+   - TTL ligado em `expiresAt`. A operação expira 180 dias depois de encerrada (`FINISHED`, `ERROR` ou `CANCELED`).
 7. `car-inventory-vehicles` (índice `plate-index`) → api-locaviaweb-car-inventory
 8. `car-inventory-reservations` (índice `vehicleId-index`) → api-locaviaweb-car-inventory
 9. `car-inventory-payments` (índice `vehicleId-index`) → api-locaviaweb-car-inventory
@@ -31,7 +37,7 @@ Filas Standard, cada uma com sua própria DLQ `<fila>-dlq`.
 ## Permissões IAM
 
 20. SQS: publicar em 1, 3 e 5; consumir e apagar em 2 e 4; `GetQueueUrl`, `GetQueueAttributes` e `CreateQueue` para o provisionamento no boot → api-locavia-web-ts
-21. SQS: publicar em 2 e 4; consumir e apagar em 1, 3 e 5; publicar nas DLQs de 1, 3 e 5 → api-locaviaweb-car-inventory
+21. SQS: publicar em 2 e 4; consumir e apagar em 1, 3 e 5; publicar nas DLQs de 1, 3 e 5; `GetQueueAttributes` em 1 a 5 e nas DLQs, usado pelo `GET /healthcheck` → api-locaviaweb-car-inventory
 22. DynamoDB: leitura e escrita nas tabelas 6 a 9 e nos índices delas → api-locaviaweb-car-inventory
 
 ## Banco do Locavia (cada ambiente)
