@@ -1,4 +1,4 @@
-#### Envio de Desmobilização 
+#### Envio de Desmobilização ☑️
 
 Os dados do veículo a serem enviados nos eventos de desmobilização são o seguinte: 
 
@@ -15,7 +15,7 @@ pagamento existentes
 
 Os eventos de desmobilização em questão são: Aberta, Cancelada ou Fechada.
 
-#### Gerenciador de Veículos Desmobilizados
+#### Gerenciador de Veículos Desmobilizados ☑️
 
 As ações abaixo já foram implementadas mas preciso que você faça um double check para confirmar: 
 
@@ -23,7 +23,7 @@ As ações abaixo já foram implementadas mas preciso que você faça um double 
 
 - Ação "Incluir na fila de integração" (individual e em lote), que reenvia a mensagem de desmobilização.
 
-#### Schemas Entidades
+#### Schemas Entidades ☑️
 
 ### **Schemas de Integração**
 
@@ -36,7 +36,7 @@ Os schemas da Integração já estão definidos porém quero ter uma dupla confi
 | **Reservas**           | Armazenar as reservas recebidas da plataforma.   | `reservaId`, `veiculoId`, `empresaId`, `comprador`, `valor`, `status`, `dataReserva`, `recebidoEm`                                                                                                                                                      |
 | **Pagamentos**         | Armazenar os pagamentos recebidos da plataforma. | `pagamentoId`, `reservaId`, `veiculoId`, `empresaId`, `valor`, `forma`, `status`, `dataPagamento`, `recebidoEm`                                                                                                                                         |
 
-#### Valores dos Campos Enumerados
+#### Valores dos Campos Enumerados ☑️
 
 Atualmente temos a integração em conjunto com o api-locavia-web-ts com todos os eventos definidos, ações e está tudo perfeito porém tenho uma tabela do projeto referente aos valores dos campos entre os três projetos(api-locavia-web-ts, api-locaviaweb-car-inventory, api externa só estoque). Garante que os valores estejam sendo obedecidos. 
 
@@ -55,7 +55,7 @@ ATENCAO: faça o mínimo de ajuste, evite ao máximo ajustes, apenas faça aquel
 | **ultimoErro.destino**     | `RETENTAR`, `DLQ`, `DESCARTAR`                               | `DLQ` ao esgotar tentativas; `DESCARTAR` para erros de validação.                             |
 | **cancelamento.acao**      | `CANCELADA`, `SUBSTITUIDA`                                   | Operação pendente cancelada por desmobilização cancelada ou substituída por evento mais novo. |
 
-#### Regras do Log 
+#### Regras do Log ☑️
 
 Já existe uma camada para auditar, porém preciso da garantia de todas as regras, mais uma vez peço que faça o mínimo possível de ajuste, somente o necessário: 
 
@@ -78,7 +78,5 @@ O banco do DynamoDB já está devidamente modelado porém temos chaves sugeridas
 | **GSI reprocessamento** | `status`         | `proximaTentativaEm` | Buscar operações `PENDENTE` prontas para nova tentativa.  |
 
 Definir o tempo de retenção dos logs (TTL) e o limite de tamanho de payload e corpo, já que um item do DynamoDB tem no máximo 400 KB.
-
-#### Recursos Expostos pela API 
 
 
