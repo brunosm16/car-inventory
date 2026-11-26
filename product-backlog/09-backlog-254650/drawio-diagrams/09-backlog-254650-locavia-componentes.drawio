@@ -1,0 +1,128 @@
+<mxfile host="65bd71144e">
+    <diagram id="lwc" name="C4 N3 - Componentes Locavia">
+        <mxGraphModel dx="1249" dy="934" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="950" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="lwc-t1" parent="1" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;" value="09 - Backlog 254650 - api-locavia-web-ts - C4 Nível 3: Componentes" vertex="1">
+                    <mxGeometry height="30" width="1400" x="30" y="15" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-front" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8a8a8a;strokeColor=#666666;fontColor=#ffffff;arcSize=8;fontSize=11;" value="front-locavia-web-angular&#xa;[inalterado]" vertex="1">
+                    <mxGeometry height="60" width="200" x="40" y="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-b" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#666666;dashed=1;verticalAlign=top;align=left;spacingLeft=8;fontSize=12;fontStyle=1;" value="&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; " vertex="1">
+                    <mxGeometry height="760" width="1000" x="280" y="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-ctrl" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#F2A900;strokeWidth=3;fontColor=#000000;arcSize=8;fontSize=10;" value="IntegracaoSoEstoqueController&#xa;/integracoes/so-estoque/configuracoes&#xa;/status-veiculo · /configuracao" vertex="1">
+                    <mxGeometry height="80" width="280" x="310" y="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-uc" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#F2A900;strokeWidth=3;fontColor=#000000;arcSize=8;fontSize=10;" value="Create/Update/Get&#xa;IntegracaoSoEstoque UseCases&#xa;(confirmação de impacto da margem)" vertex="1">
+                    <mxGeometry height="80" width="280" x="310" y="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-pubemp" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#F2A900;strokeWidth=3;fontColor=#000000;arcSize=8;fontSize=10;" value="PublicarEmpresaIntegracao&#xa;UseCase&#xa;(ativação, alteração, parâmetros,&#xa;desativação)" vertex="1">
+                    <mxGeometry height="90" width="260" x="680" y="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-emp" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;fontColor=#000000;arcSize=8;fontSize=10;" value="Create/UpdateEmpresa&#xa;UseCases (existentes)&#xa;+ chama PublicarEmpresa&#xa;quando integração ativa" vertex="1">
+                    <mxGeometry height="90" width="260" x="680" y="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-pubdes" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;fontColor=#000000;arcSize=8;fontSize=10;" value="PublicarDesmobilizacaoIntegracao&#xa;UseCase (existente)&#xa;+ checa Ativo da configuração&#xa;+ campo Origem (automatica/manual)" vertex="1">
+                    <mxGeometry height="90" width="260" x="680" y="370" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-ret" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#F2A900;strokeWidth=3;fontColor=#000000;arcSize=8;fontSize=10;" value="ConsumidorRetornoDesmobilizacao&#xa;SoEstoque&#xa;→ situação no gerenciador&#xa;→ histórico" vertex="1">
+                    <mxGeometry height="90" width="260" x="680" y="510" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-regras" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;fontColor=#000000;arcSize=8;fontSize=10;" value="ReservaVeiculoRegrasService&#xa;(existente)&#xa;+ preço mínimo (margem %)&#xa;+ data limite de cancelamento&#xa;(dias úteis, Feriados)" vertex="1">
+                    <mxGeometry height="100" width="280" x="310" y="370" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-procres" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#5d82a8;fontColor=#000000;arcSize=8;fontSize=10;" value="ProcessarReservaIntegracao&#xa;UseCase (existente)&#xa;+ grava histórico" vertex="1">
+                    <mxGeometry height="80" width="280" x="310" y="520" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-hist" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#85bbf0;strokeColor=#F2A900;strokeWidth=3;fontColor=#000000;arcSize=8;fontSize=10;" value="HistoricoIntegracaoSoEstoque&#xa;Service + GET&#xa;/veiculos/:codigo/integracao-so-estoque" vertex="1">
+                    <mxGeometry height="90" width="260" x="1000" y="370" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-sql" parent="1" style="shape=cylinder3;boundedLbl=1;whiteSpace=wrap;html=1;fillColor=#2e6295;strokeColor=#F2A900;strokeWidth=3;fontColor=#ffffff;size=10;fontSize=11;" value="SQL Server LocaviaWeb" vertex="1">
+                    <mxGeometry height="90" width="220" x="560" y="680" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-qemp" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF4D6;strokeColor=#F2A900;strokeWidth=3;fontColor=#3D3200;fontSize=10;" value="fila empresas" vertex="1">
+                    <mxGeometry height="50" width="180" x="1340" y="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-qdes" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fillColor=#FFF4D6;strokeColor=#B98900;fontColor=#3D3200;fontSize=10;" value="fila desmobilização" vertex="1">
+                    <mxGeometry height="50" width="180" x="1340" y="380" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-qret" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF4D6;strokeColor=#F2A900;strokeWidth=3;fontColor=#3D3200;fontSize=10;" value="fila desmobilização-retorno" vertex="1">
+                    <mxGeometry height="50" width="180" x="1340" y="520" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-qres" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fillColor=#FFF4D6;strokeColor=#B98900;fontColor=#3D3200;fontSize=10;" value="fila reserva" vertex="1">
+                    <mxGeometry height="50" width="180" x="40" y="540" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-ci" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168bd;strokeColor=#0b4884;fontColor=#ffffff;arcSize=8;fontSize=11;" value="api-locaviaweb-car-inventory" vertex="1">
+                    <mxGeometry height="60" width="200" x="1340" y="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-e2" edge="1" parent="1" source="lwc-front" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;" target="lwc-ctrl" value="HTTPS">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-e3" edge="1" parent="1" source="lwc-ci" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.2;entryDx=0;entryDy=0;" target="lwc-ctrl" value="GET /configuracao&#xa;(JWT integração)">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1300" y="120"/>
+                            <mxPoint x="1300" y="70"/>
+                            <mxPoint x="620" y="70"/>
+                            <mxPoint x="620" y="116"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="lwc-e4" edge="1" parent="1" source="lwc-ctrl" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;" target="lwc-uc" value="">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-e5" edge="1" parent="1" source="lwc-uc" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;" target="lwc-pubemp" value="mudou Ativo ou&#xa;parâmetro">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-e6" edge="1" parent="1" source="lwc-emp" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;" target="lwc-pubemp" value="">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-e7" edge="1" parent="1" source="lwc-pubemp" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;dashed=1;" target="lwc-qemp" value="publica">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-e8" edge="1" parent="1" source="lwc-pubdes" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;dashed=1;" target="lwc-qdes" value="publica">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-e9" edge="1" parent="1" source="lwc-qret" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;dashed=1;" target="lwc-ret" value="consome">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-e10" edge="1" parent="1" source="lwc-ret" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;" target="lwc-hist" value="registra">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-e11" edge="1" parent="1" source="lwc-qres" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;dashed=1;" target="lwc-procres" value="consome">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-e12" edge="1" parent="1" source="lwc-procres" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;" target="lwc-regras" value="valida">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="lwc-e13" edge="1" parent="1" source="lwc-procres" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;exitX=1;exitY=0.8;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="lwc-hist" value="registra">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1130" y="584"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="lwc-e14" edge="1" parent="1" source="lwc-uc" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;exitX=0.15;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="lwc-sql" value="TypeORM">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="352" y="725"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="lwc-e15" edge="1" parent="1" source="lwc-hist" style="endArrow=classic;html=1;rounded=0;fontSize=10;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="lwc-sql" value="TypeORM">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1130" y="725"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="lwc-leg16" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;align=left;verticalAlign=top;fontSize=10;spacingLeft=6;" value="Legenda&#xa;— contínua: síncrona (HTTP/SQL)&#xa;- - tracejada: assíncrona (SQS/Scheduler)&#xa;Borda laranja: novo neste backlog&#xa;Cinza: sistema externo" vertex="1">
+                    <mxGeometry height="100" width="220" x="40" y="760" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

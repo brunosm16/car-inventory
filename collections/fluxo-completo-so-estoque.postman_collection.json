@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "0dda8d87-b495-404a-a3ab-ceba0565accd",
     "name": "Fluxo completo Só Estoque - Locavia e Integração",
-    "description": "Teste de ponta a ponta da integração com a Só Estoque, com os endpoints do Locavia (api-locavia-web-ts) e da integração (api-locaviaweb-car-inventory) numa collection só. Rode a collection inteira no **Runner** e na ordem: os passos assíncronos se repetem sozinhos até terminar (fora do Runner, envie de novo).\n\n1. Desmobilização: o Locavia publica o veículo, a integração consome, grava e envia para a Só Estoque.\n2. Reserva: criada, atualizada e cancelada pela integração; o Locavia processa pela fila e devolve o resultado.\n3. Reserva retirada.\n4. Pagamento: reserva + pagamento da reserva (o Locavia grava em PagamentosReservaVeiculo, ligado à reserva e ao veículo) + cancelamento do pagamento; a reserva é cancelada no fim.\n5. Validações e 6. Situação das filas (esperando, em processamento e DLQ).\n\nAmbiente:\n- integração: `docker compose up -d` (LocalStack na 4567 e mock da Só Estoque na 3020) e `npm run dev` (porta 3001), com no `.env` `API_SO_ESTOQUE_VEHICLE_WEBHOOK_URL=http://localhost:3020/vehicle-notifications`, `API_SO_ESTOQUE_RESERVATION_WEBHOOK_URL=http://localhost:3020/reservation-notifications` e `API_SO_ESTOQUE_PAYMENT_WEBHOOK_URL=http://localhost:3020/payment-notifications`;\n- Locavia: `npm run dev`, publicando e consumindo no MESMO LocalStack da integração:\n\n```\nAWS_REGION=us-east-1\nAWS_SQS_BASE_URL=http://localhost:4567/000000000000\nAWS_SQS_ENDPOINT=http://localhost:4567\nAWS_ACCESS_KEY_ID=test\nAWS_SECRET_ACCESS_KEY=test\n```\n\nDados:\n- `locaviaSenha` e `clientSecret` vêm preenchidos com os valores do `.env` local; troque se o seu ambiente for outro;\n- o veículo é o da primeira desmobilização disponível para venda (ou a do `codigoVeiculo` informado); ele precisa estar à venda no Locavia (status 8 ou 13) e sem reserva ativa;\n- 2.1 reserva com um cliente que não existe no Locavia (CPF novo a cada execução): o Locavia cadastra o cliente como lojista (conferido em 2.4a); as reservas seguintes usam o mesmo cliente, já existente.\n\n- cada pasta roda sozinha: antes de cada requisição a collection faz login no Locavia e pega o token da integração quando faltam ou venceram e, se a placa estiver vazia, escolhe um veículo da integração sem reserva (por exemplo, a pasta 4 pode ser rodada direto).\n\nO fluxo termina com o veículo à venda e sem reserva: pode ser repetido.",
+    "description": "Teste de ponta a ponta da integração com a Só Estoque, com os endpoints do Locavia (api-locavia-web-ts) e da integração (api-locaviaweb-car-inventory) numa collection só. Rode a collection inteira no **Runner** e na ordem: os passos assíncronos se repetem sozinhos até terminar (fora do Runner, envie de novo).\n\n1. Desmobilização: o Locavia publica o veículo, a integração consome, grava e envia para a Só Estoque com a mensagem completa (veículo, FIPE, compra, venda, opcionais, empresa, alienação, última OS com itens); `GET /vehicles/{id}` e `/maintenances`; gerenciador de veículos desmobilizados (filtros e \"Incluir na fila\" em lote com o `CodigoOperacao`).\n2. Reserva: criada, atualizada e cancelada pela integração; o Locavia processa pela fila e devolve o resultado. As operações conferem o log de entrada (direction, channel, idempotencyKey `TIPO:id`, `result.action`, `request`, `response` e `publication`).\n3. Reserva retirada.\n4. Pagamento: reserva + pagamento da reserva (o Locavia grava em PagamentosReservaVeiculo, ligado à reserva e ao veículo) + cancelamento do pagamento; a reserva é cancelada no fim.\n5. Desmobilização automática: reabrir e concluir a desmobilização no Locavia publicam o veículo na fila sozinhos (sem a disponibilização manual), e a integração entrega cada mudança à Só Estoque.\n6. Regras do log: mensagem fora do contrato publicada direto na fila vira operação `ERROR` com categoria `VALIDATION` e destino `DELETE`, sem ir para a DLQ.\n7. Validações e 8. Situação das filas (esperando, em processamento e DLQ).\n\nAmbiente:\n- integração: `docker compose up -d` (LocalStack na 4567 e mock da Só Estoque na 3020) e `npm run dev` (porta 3001), com no `.env` `API_SO_ESTOQUE_VEHICLE_WEBHOOK_URL=http://localhost:3020/vehicle-notifications`, `API_SO_ESTOQUE_RESERVATION_WEBHOOK_URL=http://localhost:3020/reservation-notifications` e `API_SO_ESTOQUE_PAYMENT_WEBHOOK_URL=http://localhost:3020/payment-notifications`;\n- Locavia: `npm run dev`, publicando e consumindo no MESMO LocalStack da integração:\n\n```\nAWS_REGION=us-east-1\nAWS_SQS_BASE_URL=http://localhost:4567/000000000000\nAWS_SQS_ENDPOINT=http://localhost:4567\nAWS_ACCESS_KEY_ID=test\nAWS_SECRET_ACCESS_KEY=test\n```\n\nAntes de rodar: recrie o LocalStack dos dois projetos (filas `locaviaweb-...` e índices da tabela de operações).\n\nDados:\n- o valor FIPE só vem preenchido se a organização tiver InfoValor; sem ele, `valorFipe` é `null` e o teste aceita;\n- `locaviaSenha` e `clientSecret` vêm preenchidos com os valores do `.env` local; troque se o seu ambiente for outro;\n- o veículo é o da primeira desmobilização disponível para venda (ou a do `codigoVeiculo` informado); ele precisa estar à venda no Locavia (status 8 ou 13) e sem reserva ativa;\n- 2.1 reserva com um cliente que não existe no Locavia (CPF novo a cada execução): o Locavia cadastra o cliente como lojista (conferido em 2.4a); as reservas seguintes usam o mesmo cliente, já existente.\n\n- cada pasta roda sozinha: antes de cada requisição a collection faz login no Locavia e pega o token da integração quando faltam ou venceram e, se a placa estiver vazia, escolhe um veículo da integração sem reserva (por exemplo, a pasta 4 pode ser rodada direto).\n\nFora daqui (cobertos pelos testes unitários): cancelamento/substituição de operação pendente e encerramento em `ERROR` ao esgotar as 5 tentativas, que precisam de falha controlada do webhook.\n\nO fluxo termina com o veículo à venda e sem reserva: pode ser repetido.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -44,8 +44,8 @@
           "function veiculoLivre() {",
           "  const novaReserva = nome.includes('reservar');",
           "  if (!usa('placa') || (v('placa') && !novaReserva)) return;",
-          "  pm.sendRequest(pedido('GET', v('baseUrl') + '/vehicles?situacao=ABERTA&limit=50', null, { 'x-api-key': v('token') }), (e, r) => {",
-          "    const lista = Array.isArray(json(r).data) ? json(r).data : [];",
+          "  pm.sendRequest(pedido('GET', v('baseUrl') + '/vehicles?limit=50', null, { 'x-api-key': v('token') }), (e, r) => {",
+          "    const lista = (Array.isArray(json(r).data) ? json(r).data : []).filter((x) => x.situacao !== 'CANCELADA');",
           "    const semReserva = (x) => !(x.mensagem || {}).dadosReserva && !(x.reservas || []).some((y) => ['Ativa', 'Pendente'].includes(y.situacao));",
           "    const atual = lista.find((x) => x.placa === v('placa'));",
           "    if (atual && semReserva(atual)) return;",
@@ -66,7 +66,7 @@
   "item": [
     {
       "name": "0 - Preparação",
-      "description": "Sessão no Locavia e token da integração.",
+      "description": "Sessão no Locavia, health, healthcheck e token da integração.",
       "item": [
         {
           "name": "Locavia - login",
@@ -143,6 +143,39 @@
           "response": []
         },
         {
+          "name": "Integração - healthcheck",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const h = (pm.response.json() || {}).data || pm.response.json() || {};",
+                  "pm.test('UP', () => pm.expect(h.status).to.eql('UP'));",
+                  "pm.test('DynamoDB e filas checados', () => { const nomes = (h.dependencies || []).map((d) => d.name); pm.expect(nomes).to.include('dynamodb'); pm.expect(nomes.filter((n) => n.startsWith('sqs:'))).to.not.be.empty; });",
+                  "(h.dependencies || []).forEach((d) => pm.test(d.name + ' ' + d.status + ' (' + d.latencyMs + ' ms)' + (d.error ? ' - ' + d.error : ''), () => pm.expect(d.status).to.eql('UP')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/healthcheck",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "healthcheck"
+              ]
+            },
+            "description": "Saúde da API e das dependências: DynamoDB e as filas SQS configuradas. 503 quando alguma está fora."
+          },
+          "response": []
+        },
+        {
           "name": "Integração - token",
           "event": [
             {
@@ -194,7 +227,7 @@
     },
     {
       "name": "1 - Desmobilização",
-      "description": "Locavia → fila `locaviaweb-integracao-desmobilizacao-so-estoque` → integração (DynamoDB) → Só Estoque.",
+      "description": "Locavia → fila `locaviaweb-integracao-desmobilizacao-so-estoque` → integração (DynamoDB) → Só Estoque, com a mensagem completa; depois o gerenciador de veículos desmobilizados do Locavia.",
       "item": [
         {
           "name": "1.1 Locavia - recuperar veículos disponíveis para venda",
@@ -225,6 +258,8 @@
                   "  pm.collectionVariables.set('codigoDesmobilizacao', item.CodigoDesmobilizacao);",
                   "  pm.collectionVariables.set('codigoVeiculo', item.CodigoVeiculo);",
                   "  pm.collectionVariables.set('placa', item.Placa);",
+                  "  pm.collectionVariables.set('situacaoDesmobilizacao', item.IDSituacao);",
+                  "  pm.collectionVariables.set('dataPrevisaoTermino', String((item.DadosDesmobilizacao || {}).DataPrevisaoTermino || '').slice(0, 10));",
                   "  console.log('Desmobilização ' + item.CodigoDesmobilizacao + ' - veículo ' + item.CodigoVeiculo + ' ' + item.Placa);",
                   "}"
                 ]
@@ -278,6 +313,8 @@
                   "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const r = ((pm.response.json() || {}).data || [])[0] || {};",
                   "pm.test('publicada na fila (' + r.Mensagem + ')', () => { pm.expect(r.Sucesso).to.eql(true); pm.expect(r.CodigoMensagemFila).to.be.a('string'); });",
+                  "pm.test('CodigoOperacao para acompanhar na integração', () => pm.expect(r.CodigoOperacao).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('operationIdDesmobilizacao', r.CodigoOperacao);",
                   "pm.collectionVariables.set('tentativas', '0');"
                 ]
               }
@@ -307,6 +344,7 @@
                 "disponibilizacao"
               ]
             },
+            "description": "Publica a mensagem e devolve o `CodigoOperacao` (= `eventId` = `operationId` na integração).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"CodigoDesmobilizacao\": [{{codigoDesmobilizacao}}]\n}",
@@ -320,7 +358,7 @@
           "response": []
         },
         {
-          "name": "1.3 Só Estoque (mock) - veículo recebido",
+          "name": "1.3 Integração - operação da desmobilização",
           "event": [
             {
               "listen": "prerequest",
@@ -337,10 +375,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "const entregas = (pm.response.json() || []).filter((e) => e.vehicle && e.vehicle.placa === pm.collectionVariables.get('placa'));",
-                  "const e = entregas.filter((x) => x.vehicle.mensagem.dadosDesmobilizacao.codigoDesmobilizacao === pm.collectionVariables.get('codigoDesmobilizacao')).pop();",
-                  "const pronto = !!e;",
+                  "const d = pm.response.code === 200 ? ((pm.response.json() || {}).data || {}) : {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
                   "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
                   "if (!pronto && tentativa < 15) {",
                   "  pm.collectionVariables.set('tentativas', String(tentativa));",
@@ -348,8 +384,81 @@
                   "  pm.test('aguardando a integração consumir a fila (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
                   "} else {",
                   "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message : '';",
+                  "  pm.test('VEHICLE_DEMOBILIZATION FINISHED (atual: ' + (d.status || pm.response.code) + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('VEHICLE_DEMOBILIZATION');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  pm.test('saída pela fila (direction OUTBOUND, channel SQS)', () => { pm.expect(d.direction).to.eql('OUTBOUND'); pm.expect(d.channel).to.eql('SQS'); });",
+                  "  pm.test('idempotencyKey = VEHICLE_DEMOBILIZATION:<eventId>', () => pm.expect(d.idempotencyKey).to.eql('VEHICLE_DEMOBILIZATION:' + pm.collectionVariables.get('operationIdDesmobilizacao')));",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "  pm.test('result.action CREATED ou UPDATED', () => pm.expect(['CREATED', 'UPDATED']).to.include(d.result.action));",
+                  "  pm.test('result.request = veículo enviado à Só Estoque', () => pm.expect(d.result.request.vehicle.placa).to.eql(pm.collectionVariables.get('placa')));",
+                  "  pm.test('result.response = resposta da Só Estoque', () => pm.expect(d.result.response.httpStatus).to.be.within(200, 299));",
+                  "  pm.test('result.publication só nas operações de entrada', () => pm.expect(d.result.publication).to.be.undefined);",
+                  "  pm.test('sem próxima tentativa', () => pm.expect(d.nextAttemptAt).to.be.undefined);",
+                  "  pm.test('timeline até a entrega à Só Estoque', () => pm.expect((d.timeline || []).map((e) => e.step)).to.include.members(['REQUESTED', 'PROCESSING', 'VEHICLE_SAVED', 'SO_ESTOQUE_NOTIFIED', 'FINISHED']));",
+                  "  console.log(d);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/operations/{{operationIdDesmobilizacao}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "operations",
+                "{{operationIdDesmobilizacao}}"
+              ]
+            },
+            "description": "GET /vehicles/operations/{operationId} com o `CodigoOperacao` do 1.2. Esperado: `FINISHED`, saída pela fila, chave de idempotência `TIPO:eventId` e o webhook enviado/recebido no resultado."
+          },
+          "response": []
+        },
+        {
+          "name": "1.4 Só Estoque (mock) - veículo com a mensagem completa",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const e = (pm.response.json() || []).filter((x) => x.eventId === pm.collectionVariables.get('operationIdDesmobilizacao')).pop();",
+                  "const pronto = !!e;",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando a entrega à Só Estoque (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
                   "  pm.test('veículo entregue à Só Estoque', () => pm.expect(e, 'não entregue').to.be.an('object'));",
-                  "  if (e) { pm.test('evento vehicle.demobilization', () => pm.expect(e.event).to.eql('vehicle.demobilization')); console.log(e); }",
+                  "  if (e) {",
+                  "    const m = e.vehicle.mensagem;",
+                  "    pm.test('evento vehicle.demobilization', () => pm.expect(e.event).to.eql('vehicle.demobilization'));",
+                  "    pm.test('situação em maiúsculas', () => pm.expect(['ABERTA', 'FECHADA', 'CANCELADA']).to.include(e.vehicle.situacao));",
+                  "    pm.test('desmobilização do teste', () => pm.expect(String(m.dadosDesmobilizacao.codigoDesmobilizacao)).to.eql(String(pm.collectionVariables.get('codigoDesmobilizacao'))));",
+                  "    pm.test('dadosVeiculo: cadastro, empresa, alienação e opcionais', () => { pm.expect(m.dadosVeiculo).to.include.keys('chassi', 'renavam', 'hodometro', 'anoFabricacao', 'anoModelo', 'marca', 'modelo', 'versao', 'cor', 'tipoCombustivel', 'numeroPortas', 'patio', 'status', 'codigoEmpresa', 'empresa', 'alienacaoFiduciaria'); pm.expect(m.dadosVeiculo.opcionais).to.be.an('array'); });",
+                  "    pm.test('dadosFipe: código, competência e valor', () => { pm.expect(m.dadosFipe).to.include.keys('codigoFipe', 'competenciaFipe', 'valorFipe'); pm.expect(m.dadosFipe.competenciaFipe).to.match(/^\\d{4}-\\d{2}$/); });",
+                  "    pm.test('dadosCompra e dadosVenda', () => { pm.expect(m.dadosCompra).to.include.keys('dataCompra', 'numeroNFCompra', 'fornecedor', 'cnpjFornecedor', 'valorCompra'); pm.expect(m.dadosVenda).to.include.keys('dataPrevistaVenda', 'valorPrevistoVenda', 'dataEntradaVenda', 'dataVenda', 'valorVenda', 'tipoMidia'); });",
+                  "    pm.test('dadosManutencao com a última OS', () => { pm.expect(m.dadosManutencao.ordensServico).to.be.an('array'); pm.expect(m.dadosManutencao).to.have.property('ultimaOrdemServico'); });",
+                  "    pm.test('reservas e pagamentos', () => { pm.expect(e.vehicle.reservas).to.be.an('array'); pm.expect(e.vehicle.pagamentos).to.be.an('array'); });",
+                  "    console.log(e);",
+                  "  }",
                   "}"
                 ]
               }
@@ -367,12 +476,12 @@
                 "vehicle-notifications"
               ]
             },
-            "description": "A integração consumiu a fila, gravou o veículo e entregou à Só Estoque."
+            "description": "Webhook `vehicle.demobilization` recebido pela Só Estoque: veículo, FIPE, compra, venda, desmobilização e a última OS com itens."
           },
           "response": []
         },
         {
-          "name": "1.4 Integração - consultar o veículo enviado para a Só Estoque",
+          "name": "1.5 Integração - GET /vehicles/{id}",
           "event": [
             {
               "listen": "test",
@@ -380,17 +489,368 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "const v = ((pm.response.json() || {}).data || [])[0];",
-                  "pm.test('veículo {{placa}} na integração', () => pm.expect(v).to.be.an('object'));",
-                  "if (v) {",
-                  "  pm.test('situação, desmobilização e manutenção', () => {",
-                  "    pm.expect(['ABERTA', 'FECHADA', 'CANCELADA']).to.include(v.situacao);",
-                  "    pm.expect(v.mensagem.dadosDesmobilizacao.codigoDesmobilizacao).to.eql(pm.collectionVariables.get('codigoDesmobilizacao'));",
-                  "    pm.expect(v.mensagem.dadosManutencao.ordensServico).to.be.an('array');",
-                  "    pm.expect(v.reservas).to.be.an('array');",
-                  "    pm.expect(v.pagamentos).to.be.an('array');",
+                  "const v = (pm.response.json() || {}).data || {};",
+                  "pm.test('veículo {{placa}}', () => { pm.expect(v.codigoVeiculo).to.eql(String(pm.collectionVariables.get('codigoVeiculo'))); pm.expect(v.placa).to.eql(pm.collectionVariables.get('placa')); });",
+                  "pm.test('situação em maiúsculas', () => pm.expect(['ABERTA', 'FECHADA', 'CANCELADA']).to.include(v.situacao));",
+                  "pm.test('desmobilização do teste', () => pm.expect(String(v.mensagem.dadosDesmobilizacao.codigoDesmobilizacao)).to.eql(String(pm.collectionVariables.get('codigoDesmobilizacao'))));",
+                  "pm.test('reservas e pagamentos', () => { pm.expect(v.reservas).to.be.an('array'); pm.expect(v.pagamentos).to.be.an('array'); });",
+                  "const dv = v.mensagem.dadosVeiculo || {};",
+                  "pm.test('idLocadora (codigoEmpresa + empresa)', () => { pm.expect(dv.codigoEmpresa).to.be.a('string'); pm.expect(dv).to.have.property('empresa'); });",
+                  "pm.test('alienacaoFiduciaria false (o gerenciador só publica veículo não alienado)', () => pm.expect(dv.alienacaoFiduciaria).to.eql(false));",
+                  "pm.test('opcionais com tipo S/O/A', () => (dv.opcionais || []).forEach((o) => { pm.expect(o.codigoEquipamento).to.be.a('string'); pm.expect([null, 'S', 'O', 'A']).to.include(o.tipoEquipamento); }));",
+                  "pm.test('valor FIPE número ou nulo (sem cotação/InfoValor)', () => { const valor = v.mensagem.dadosFipe.valorFipe; pm.expect(valor === null || typeof valor === 'number').to.eql(true); if (valor !== null) pm.expect(valor).to.be.above(0); });",
+                  "pm.test('dataAtualizacaoLocavia', () => pm.expect(v.dataAtualizacaoLocavia).to.be.a('string'));",
+                  "if (v.situacao) pm.collectionVariables.set('situacaoVeiculo', v.situacao);",
+                  "console.log(v);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/{{codigoVeiculo}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "{{codigoVeiculo}}"
+              ]
+            },
+            "description": "O veículo do DynamoDB com o dicionário de dados completo, reservas e pagamentos."
+          },
+          "response": []
+        },
+        {
+          "name": "1.6 Integração - GET /vehicles/{id}/maintenances",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const m = (pm.response.json() || {}).data || {};",
+                  "pm.test('ordens de serviço', () => pm.expect(m.ordensServico).to.be.an('array'));",
+                  "const u = m.ultimaOrdemServico;",
+                  "if (m.ordensServico.length) {",
+                  "  pm.test('última OS = a mais recente da lista', () => pm.expect(u.codigoOrdemServico).to.eql(m.ordensServico[0].codigoOrdemServico));",
+                  "  pm.test('última OS com fornecedor, valor total e itens', () => { pm.expect(u).to.include.keys('numeroOS', 'fornecedor', 'cnpjFornecedor', 'valorTotal', 'itens'); pm.expect(u.itens).to.be.an('array'); });",
+                  "  pm.test('itens numerados com tipo de serviço e de item', () => u.itens.forEach((item, i) => { pm.expect(item.numeroItem).to.eql(i + 1); pm.expect(item).to.include.keys('descricao', 'tipoManutencao', 'tipoItem', 'quantidade', 'valorUnitario', 'valorTotal'); }));",
+                  "} else {",
+                  "  pm.test('sem OS: ultimaOrdemServico nula', () => pm.expect(u).to.be.null);",
+                  "}",
+                  "console.log(m);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/{{codigoVeiculo}}/maintenances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "{{codigoVeiculo}}",
+                "maintenances"
+              ]
+            },
+            "description": "Ordens de serviço do veículo e a última OS (não cancelada) com fornecedor, valor total e itens."
+          },
+          "response": []
+        },
+        {
+          "name": "1.7 Integração - filtro por situação aceita minúsculas",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('situacaoMinuscula', String(pm.collectionVariables.get('situacaoVeiculo') || 'ABERTA').toLowerCase());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const lista = (pm.response.json() || {}).data || [];",
+                  "const esperada = String(pm.collectionVariables.get('situacaoMinuscula')).toUpperCase();",
+                  "pm.test('veículo {{placa}} encontrado com situacao=' + pm.collectionVariables.get('situacaoMinuscula'), () => pm.expect(lista.map((v) => v.placa)).to.include(pm.collectionVariables.get('placa')));",
+                  "pm.test('só ' + esperada, () => lista.forEach((v) => pm.expect(v.situacao).to.eql(esperada)));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles?situacao={{situacaoMinuscula}}&placa={{placa}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles"
+              ],
+              "query": [
+                {
+                  "key": "situacao",
+                  "value": "{{situacaoMinuscula}}"
+                },
+                {
+                  "key": "placa",
+                  "value": "{{placa}}"
+                }
+              ]
+            },
+            "description": "A situação é `ABERTA`/`FECHADA`/`CANCELADA`; o filtro aceita o valor em qualquer caixa. Filtra pela situação do veículo do teste (gravada no 1.5) em minúsculas."
+          },
+          "response": []
+        },
+        {
+          "name": "1.8 Locavia - gerenciador: filtro por placa",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const items = ((pm.response.json() || {}).data || {}).items || [];",
+                  "pm.test('encontrou a placa KHP0394', () => pm.expect(items).to.not.be.empty);",
+                  "pm.test('só a placa KHP0394', () => items.forEach((i) => pm.expect(i.Placa).to.eql('KHP0394')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/desmobilizacoes-integracao-gerenciador",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "desmobilizacoes-integracao-gerenciador"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Placa\": \"KHP0394\",\n  \"page\": 1,\n  \"limit\": 20\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.9 Locavia - gerenciador: filtro por situação e período",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const filtro = { Situacao: pm.collectionVariables.get('situacaoDesmobilizacao'), page: 1, limit: 100 };",
+                  "const data = pm.collectionVariables.get('dataPrevisaoTermino');",
+                  "if (data) { filtro.DataPrevisaoTerminoInicial = data; filtro.DataPrevisaoTerminoFinal = data; }",
+                  "else console.warn('Desmobilização sem DataPrevisaoTermino: filtro só por situação');",
+                  "pm.collectionVariables.set('filtroSituacaoPeriodo', JSON.stringify(filtro));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const r = (pm.response.json() || {}).data || {};",
+                  "const items = r.items || [];",
+                  "const situacao = pm.collectionVariables.get('situacaoDesmobilizacao');",
+                  "const data = pm.collectionVariables.get('dataPrevisaoTermino');",
+                  "pm.test('desmobilização do teste encontrada', () => pm.expect(items.map((i) => String(i.CodigoDesmobilizacao))).to.include(String(pm.collectionVariables.get('codigoDesmobilizacao'))));",
+                  "pm.test('só situação ' + situacao, () => items.forEach((i) => pm.expect(i.IDSituacao).to.eql(situacao)));",
+                  "if (data) pm.test('só previsão de término em ' + data, () => items.forEach((i) => pm.expect(String(i.DadosDesmobilizacao.DataPrevisaoTermino).slice(0, 10)).to.eql(data)));",
+                  "pm.test('paginada', () => pm.expect(r.meta).to.include.keys('totalItems', 'currentPage', 'itemsPerPage'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/desmobilizacoes-integracao-gerenciador",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "desmobilizacoes-integracao-gerenciador"
+              ]
+            },
+            "description": "Filtra pela situação e pela data de previsão de término da desmobilização do teste (gravadas no 1.1): ela tem de aparecer no resultado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{{filtroSituacaoPeriodo}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.10 Locavia - gerenciador: incluir na fila em lote",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const lista = (pm.response.json() || {}).data || [];",
+                  "const publicada = lista.find((r) => String(r.CodigoDesmobilizacao) === String(pm.collectionVariables.get('codigoDesmobilizacao'))) || {};",
+                  "const inexistente = lista.find((r) => String(r.CodigoDesmobilizacao) === '999999999') || {};",
+                  "pm.test('um resultado por item', () => pm.expect(lista).to.have.lengthOf(2));",
+                  "pm.test('desmobilização do teste publicada com CodigoOperacao', () => { pm.expect(publicada.Sucesso).to.eql(true); pm.expect(publicada.CodigoOperacao).to.be.a('string'); });",
+                  "pm.test('inexistente recusada sem CodigoOperacao', () => { pm.expect(inexistente.Sucesso).to.eql(false); pm.expect(inexistente.CodigoOperacao).to.be.undefined; });",
+                  "pm.collectionVariables.set('operationIdLote', publicada.CodigoOperacao);",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/desmobilizacoes-integracao-gerenciador/disponibilizacao",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "desmobilizacoes-integracao-gerenciador",
+                "disponibilizacao"
+              ]
+            },
+            "description": "Lote com a desmobilização do teste e uma inexistente: resultado por item; só a publicada tem `CodigoOperacao`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"CodigoDesmobilizacao\": [{{codigoDesmobilizacao}}, 999999999]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.11 Integração - status da operação pelo CodigoOperacao",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.code === 200 ? ((pm.response.json() || {}).data || {}) : {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando a integração consumir a fila (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message : '';",
+                  "  pm.test('VEHICLE_DEMOBILIZATION FINISHED (atual: ' + (d.status || pm.response.code) + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('VEHICLE_DEMOBILIZATION');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
                   "  });",
-                  "  console.log(v);",
+                  "  pm.test('saída pela fila (direction OUTBOUND, channel SQS)', () => { pm.expect(d.direction).to.eql('OUTBOUND'); pm.expect(d.channel).to.eql('SQS'); });",
+                  "  pm.test('idempotencyKey = VEHICLE_DEMOBILIZATION:<eventId>', () => pm.expect(d.idempotencyKey).to.eql('VEHICLE_DEMOBILIZATION:' + pm.collectionVariables.get('operationIdLote')));",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "  pm.test('veículo já existia: result.action UPDATED', () => pm.expect(d.result.action).to.eql('UPDATED'));",
+                  "  console.log(d);",
                   "}"
                 ]
               }
@@ -406,21 +866,17 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/vehicles?placa={{placa}}",
+              "raw": "{{baseUrl}}/vehicles/operations/{{operationIdLote}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "vehicles"
-              ],
-              "query": [
-                {
-                  "key": "placa",
-                  "value": "{{placa}}"
-                }
+                "vehicles",
+                "operations",
+                "{{operationIdLote}}"
               ]
             },
-            "description": "Veículo gravado no DynamoDB com a mensagem do Locavia, as reservas e os pagamentos."
+            "description": "O gerenciador acompanha o envio por `GET /vehicles/operations/{CodigoOperacao}`."
           },
           "response": []
         }
@@ -535,6 +991,13 @@
                   "  });",
                   "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
                   "  if (d.result && d.result.reservationId) pm.collectionVariables.set('codigoReserva', d.result.reservationId);",
+                  "  pm.collectionVariables.set('operationIdReserva', d.operationId);",
+                  "  pm.test('entrada por HTTP (direction INBOUND, channel HTTP)', () => { pm.expect(d.direction).to.eql('INBOUND'); pm.expect(d.channel).to.eql('HTTP'); });",
+                  "  pm.test('idempotencyKey = RESERVATION_CREATE:<referência da Só Estoque>', () => pm.expect(d.idempotencyKey).to.eql('RESERVATION_CREATE:' + pm.collectionVariables.get('refReserva')));",
+                  "  pm.test('result.action PUBLISHED', () => pm.expect((d.result || {}).action).to.eql('PUBLISHED'));",
+                  "  pm.test('result.publication = mensagem reserva.criar publicada ao Locavia', () => { pm.expect(d.result.publication.eventType).to.eql('reserva.criar'); pm.expect(d.result.publication.ReferenciaExterna).to.eql(pm.collectionVariables.get('refReserva')); });",
+                  "  pm.test('result.request / result.response = webhook enviado e resposta da Só Estoque', () => { pm.expect(d.result.request.externalReference).to.eql(pm.collectionVariables.get('refReserva')); pm.expect(d.result.response.httpStatus).to.be.within(200, 299); });",
+                  "  pm.test('sem próxima tentativa nem erro', () => { pm.expect(d.nextAttemptAt).to.be.undefined; pm.expect(d.lastError).to.be.undefined; });",
                   "}"
                 ]
               }
@@ -1109,6 +1572,7 @@
                   "    pm.expect(d.status).to.eql('FINISHED');",
                   "  });",
                   "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "  pm.test('idempotencyKey = RESERVATION_CANCEL:<referência>', () => pm.expect(d.idempotencyKey).to.eql('RESERVATION_CANCEL:' + pm.collectionVariables.get('refReserva')));",
                   "}"
                 ]
               }
@@ -1937,6 +2401,12 @@
                   "  });",
                   "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
                   "  if (d.result && d.result.paymentId) pm.collectionVariables.set('codigoPagamento', d.result.paymentId);",
+                  "  pm.test('entrada por HTTP (direction INBOUND, channel HTTP)', () => { pm.expect(d.direction).to.eql('INBOUND'); pm.expect(d.channel).to.eql('HTTP'); });",
+                  "  pm.test('idempotencyKey = PAYMENT_REGISTER:<referência da Só Estoque>', () => pm.expect(d.idempotencyKey).to.eql('PAYMENT_REGISTER:' + pm.collectionVariables.get('refPagamento')));",
+                  "  pm.test('result.action PUBLISHED', () => pm.expect((d.result || {}).action).to.eql('PUBLISHED'));",
+                  "  pm.test('result.publication = mensagem pagamento.registrar publicada ao Locavia', () => { pm.expect(d.result.publication.eventType).to.eql('pagamento.registrar'); pm.expect(d.result.publication.ReferenciaExterna).to.eql(pm.collectionVariables.get('refPagamento')); });",
+                  "  pm.test('result.request / result.response = webhook enviado e resposta da Só Estoque', () => { pm.expect(d.result.request.externalReference).to.eql(pm.collectionVariables.get('refPagamento')); pm.expect(d.result.response.httpStatus).to.be.within(200, 299); });",
+                  "  pm.test('sem próxima tentativa nem erro', () => { pm.expect(d.nextAttemptAt).to.be.undefined; pm.expect(d.lastError).to.be.undefined; });",
                   "}"
                 ]
               }
@@ -2232,6 +2702,7 @@
                   "    pm.expect(d.status).to.eql('FINISHED');",
                   "  });",
                   "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "  pm.test('idempotencyKey = PAYMENT_CANCEL:<referência>', () => pm.expect(d.idempotencyKey).to.eql('PAYMENT_CANCEL:' + pm.collectionVariables.get('refPagamento')));",
                   "}"
                 ]
               }
@@ -2432,6 +2903,7 @@
                   "    pm.expect(d.status).to.eql('FINISHED');",
                   "  });",
                   "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "  pm.test('idempotencyKey = RESERVATION_CANCEL:<referência>', () => pm.expect(d.idempotencyKey).to.eql('RESERVATION_CANCEL:' + pm.collectionVariables.get('refReservaPagamento')));",
                   "}"
                 ]
               }
@@ -2464,7 +2936,946 @@
       ]
     },
     {
-      "name": "5 - Validações",
+      "name": "5 - Desmobilização automática",
+      "description": "Locavia (reabertura ou conclusão da desmobilização) → fila `locaviaweb-integracao-desmobilizacao-so-estoque` → integração (DynamoDB) → Só Estoque, sem passar pela disponibilização manual. Termina com a desmobilização fechada e o veículo À venda. O cancelamento também publica, mas não entra aqui: não tem volta e tiraria o veículo do teste.",
+      "item": [
+        {
+          "name": "5.1 Integração - desmobilização do veículo do teste",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const v = ((pm.response.json() || {}).data || [])[0];",
+                  "pm.test('veículo {{placa}} na integração', () => pm.expect(v).to.be.an('object'));",
+                  "if (v) {",
+                  "  pm.collectionVariables.set('codigoDesmobilizacao', v.mensagem.dadosDesmobilizacao.codigoDesmobilizacao);",
+                  "  pm.test('desmobilização ' + v.situacao + ' (não cancelada)', () => pm.expect(['ABERTA', 'FECHADA']).to.include(v.situacao));",
+                  "  if (v.situacao === 'FECHADA' && typeof postman !== 'undefined') postman.setNextRequest('5.5 Locavia - reabrir desmobilização');",
+                  "  console.log(v);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles?placa={{placa}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles"
+              ],
+              "query": [
+                {
+                  "key": "placa",
+                  "value": "{{placa}}"
+                }
+              ]
+            },
+            "description": "Situação atual da desmobilização. Aberta: começa concluindo (5.2); fechada: vai direto para a reabertura (5.5)."
+          },
+          "response": []
+        },
+        {
+          "name": "5.2 Locavia - concluir desmobilização aberta",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.sendRequest(pm.collectionVariables.get('soEstoqueMockUrl') + '/vehicle-notifications', (erro, resposta) => {",
+                  "  let lista = [];",
+                  "  try { lista = resposta.json() || []; } catch (e) {}",
+                  "  pm.collectionVariables.set('entregasAntes', String(lista.length));",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json() || {};",
+                  "pm.test('desmobilização fechada no Locavia' + (r.erros ? ' - ' + JSON.stringify(r.erros) : ''), () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/desmobilizacoes/conclusao?CodigoDesmobilizacao={{codigoDesmobilizacao}}",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "desmobilizacoes",
+                "conclusao"
+              ],
+              "query": [
+                {
+                  "key": "CodigoDesmobilizacao",
+                  "value": "{{codigoDesmobilizacao}}"
+                }
+              ]
+            },
+            "description": "Só roda quando a desmobilização está aberta. Situação Fechada e veículo À venda (status 8); o Locavia publica a mudança depois do commit."
+          },
+          "response": []
+        },
+        {
+          "name": "5.3 Só Estoque (mock) - evento fechada",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const novas = (pm.response.json() || []).slice(Number(pm.collectionVariables.get('entregasAntes') || 0));",
+                  "const e = novas.filter((x) => x.vehicle && x.vehicle.placa === pm.collectionVariables.get('placa') && x.vehicle.situacao === 'FECHADA').pop();",
+                  "const pronto = !!e;",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando o Locavia publicar e a integração entregar (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  pm.test('evento FECHADA entregue à Só Estoque', () => pm.expect(e, 'não entregue: veja a pasta 8 - Situação das filas e o log do Locavia').to.be.an('object'));",
+                  "  if (e) {",
+                  "    pm.test('vehicle.demobilization da desmobilização ' + pm.collectionVariables.get('codigoDesmobilizacao'), () => {",
+                  "      pm.expect(e.event).to.eql('vehicle.demobilization');",
+                  "      pm.expect(String(e.vehicle.mensagem.dadosDesmobilizacao.codigoDesmobilizacao)).to.eql(String(pm.collectionVariables.get('codigoDesmobilizacao')));",
+                  "    });",
+                  "    pm.collectionVariables.set('operationId', e.eventId);",
+                  "    console.log(e);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{soEstoqueMockUrl}}/vehicle-notifications",
+              "host": [
+                "{{soEstoqueMockUrl}}"
+              ],
+              "path": [
+                "vehicle-notifications"
+              ]
+            },
+            "description": "O Locavia publicou a desmobilização sozinho na fila; a integração consumiu, gravou e entregou `vehicle.demobilization` com o veículo `FECHADA`."
+          },
+          "response": []
+        },
+        {
+          "name": "5.4 Integração - operação do evento fechada",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.code === 200 ? ((pm.response.json() || {}).data || {}) : {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando a integração consumir a fila (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message : '';",
+                  "  pm.test('VEHICLE_DEMOBILIZATION FINISHED (atual: ' + (d.status || pm.response.code) + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('VEHICLE_DEMOBILIZATION');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  pm.test('saída pela fila (direction OUTBOUND, channel SQS)', () => { pm.expect(d.direction).to.eql('OUTBOUND'); pm.expect(d.channel).to.eql('SQS'); });",
+                  "  pm.test('idempotencyKey = VEHICLE_DEMOBILIZATION:<eventId>', () => pm.expect(d.idempotencyKey).to.eql('VEHICLE_DEMOBILIZATION:' + pm.collectionVariables.get('operationId')));",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "  pm.test('timeline até a entrega à Só Estoque', () => pm.expect((d.timeline || []).map((e) => e.step)).to.include.members(['REQUESTED', 'PROCESSING', 'VEHICLE_SAVED', 'SO_ESTOQUE_NOTIFIED', 'FINISHED']));",
+                  "  console.log(d);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "GET /vehicles/operations/{eventId} do evento entregue. Esperado: `FINISHED`."
+          },
+          "response": []
+        },
+        {
+          "name": "5.5 Locavia - reabrir desmobilização",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.sendRequest(pm.collectionVariables.get('soEstoqueMockUrl') + '/vehicle-notifications', (erro, resposta) => {",
+                  "  let lista = [];",
+                  "  try { lista = resposta.json() || []; } catch (e) {}",
+                  "  pm.collectionVariables.set('entregasAntes', String(lista.length));",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json() || {};",
+                  "pm.test('desmobilização aberta no Locavia' + (r.erros ? ' - ' + JSON.stringify(r.erros) : ''), () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/desmobilizacoes/reabertura",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "desmobilizacoes",
+                "reabertura"
+              ]
+            },
+            "description": "Situação Aberta e veículo em Preparação Venda (status 11); o Locavia publica a mudança depois do commit.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"CodigoDesmobilizacao\": {{codigoDesmobilizacao}},\n  \"Justificativa\": \"Teste da desmobilização automática\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.6 Só Estoque (mock) - evento aberta",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const novas = (pm.response.json() || []).slice(Number(pm.collectionVariables.get('entregasAntes') || 0));",
+                  "const e = novas.filter((x) => x.vehicle && x.vehicle.placa === pm.collectionVariables.get('placa') && x.vehicle.situacao === 'ABERTA').pop();",
+                  "const pronto = !!e;",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando o Locavia publicar e a integração entregar (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  pm.test('evento ABERTA entregue à Só Estoque', () => pm.expect(e, 'não entregue: veja a pasta 8 - Situação das filas e o log do Locavia').to.be.an('object'));",
+                  "  if (e) {",
+                  "    pm.test('vehicle.demobilization da desmobilização ' + pm.collectionVariables.get('codigoDesmobilizacao'), () => {",
+                  "      pm.expect(e.event).to.eql('vehicle.demobilization');",
+                  "      pm.expect(String(e.vehicle.mensagem.dadosDesmobilizacao.codigoDesmobilizacao)).to.eql(String(pm.collectionVariables.get('codigoDesmobilizacao')));",
+                  "    });",
+                  "    pm.collectionVariables.set('operationId', e.eventId);",
+                  "    console.log(e);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{soEstoqueMockUrl}}/vehicle-notifications",
+              "host": [
+                "{{soEstoqueMockUrl}}"
+              ],
+              "path": [
+                "vehicle-notifications"
+              ]
+            },
+            "description": "O Locavia publicou a desmobilização sozinho na fila; a integração consumiu, gravou e entregou `vehicle.demobilization` com o veículo `ABERTA`."
+          },
+          "response": []
+        },
+        {
+          "name": "5.7 Integração - operação do evento aberta",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.code === 200 ? ((pm.response.json() || {}).data || {}) : {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando a integração consumir a fila (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message : '';",
+                  "  pm.test('VEHICLE_DEMOBILIZATION FINISHED (atual: ' + (d.status || pm.response.code) + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('VEHICLE_DEMOBILIZATION');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  pm.test('saída pela fila (direction OUTBOUND, channel SQS)', () => { pm.expect(d.direction).to.eql('OUTBOUND'); pm.expect(d.channel).to.eql('SQS'); });",
+                  "  pm.test('idempotencyKey = VEHICLE_DEMOBILIZATION:<eventId>', () => pm.expect(d.idempotencyKey).to.eql('VEHICLE_DEMOBILIZATION:' + pm.collectionVariables.get('operationId')));",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "  pm.test('timeline até a entrega à Só Estoque', () => pm.expect((d.timeline || []).map((e) => e.step)).to.include.members(['REQUESTED', 'PROCESSING', 'VEHICLE_SAVED', 'SO_ESTOQUE_NOTIFIED', 'FINISHED']));",
+                  "  console.log(d);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "GET /vehicles/operations/{eventId} do evento entregue. Esperado: `FINISHED`."
+          },
+          "response": []
+        },
+        {
+          "name": "5.8 Integração - veículo com a desmobilização aberta",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const v = ((pm.response.json() || {}).data || [])[0];",
+                  "pm.test('veículo {{placa}} na integração', () => pm.expect(v).to.be.an('object'));",
+                  "if (v) {",
+                  "  pm.test('situação ABERTA', () => pm.expect(v.situacao).to.eql('ABERTA'));",
+                  "  console.log(v);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles?placa={{placa}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles"
+              ],
+              "query": [
+                {
+                  "key": "placa",
+                  "value": "{{placa}}"
+                }
+              ]
+            },
+            "description": "O DynamoDB reflete a reabertura."
+          },
+          "response": []
+        },
+        {
+          "name": "5.9 Locavia - concluir desmobilização (volta à venda)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.sendRequest(pm.collectionVariables.get('soEstoqueMockUrl') + '/vehicle-notifications', (erro, resposta) => {",
+                  "  let lista = [];",
+                  "  try { lista = resposta.json() || []; } catch (e) {}",
+                  "  pm.collectionVariables.set('entregasAntes', String(lista.length));",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json() || {};",
+                  "pm.test('desmobilização fechada no Locavia' + (r.erros ? ' - ' + JSON.stringify(r.erros) : ''), () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/desmobilizacoes/conclusao?CodigoDesmobilizacao={{codigoDesmobilizacao}}",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "desmobilizacoes",
+                "conclusao"
+              ],
+              "query": [
+                {
+                  "key": "CodigoDesmobilizacao",
+                  "value": "{{codigoDesmobilizacao}}"
+                }
+              ]
+            },
+            "description": "Situação Fechada e veículo À venda de novo (status 8): o fluxo pode ser repetido."
+          },
+          "response": []
+        },
+        {
+          "name": "5.10 Só Estoque (mock) - evento fechada",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const novas = (pm.response.json() || []).slice(Number(pm.collectionVariables.get('entregasAntes') || 0));",
+                  "const e = novas.filter((x) => x.vehicle && x.vehicle.placa === pm.collectionVariables.get('placa') && x.vehicle.situacao === 'FECHADA').pop();",
+                  "const pronto = !!e;",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando o Locavia publicar e a integração entregar (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  pm.test('evento FECHADA entregue à Só Estoque', () => pm.expect(e, 'não entregue: veja a pasta 8 - Situação das filas e o log do Locavia').to.be.an('object'));",
+                  "  if (e) {",
+                  "    pm.test('vehicle.demobilization da desmobilização ' + pm.collectionVariables.get('codigoDesmobilizacao'), () => {",
+                  "      pm.expect(e.event).to.eql('vehicle.demobilization');",
+                  "      pm.expect(String(e.vehicle.mensagem.dadosDesmobilizacao.codigoDesmobilizacao)).to.eql(String(pm.collectionVariables.get('codigoDesmobilizacao')));",
+                  "    });",
+                  "    pm.collectionVariables.set('operationId', e.eventId);",
+                  "    console.log(e);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{soEstoqueMockUrl}}/vehicle-notifications",
+              "host": [
+                "{{soEstoqueMockUrl}}"
+              ],
+              "path": [
+                "vehicle-notifications"
+              ]
+            },
+            "description": "O Locavia publicou a desmobilização sozinho na fila; a integração consumiu, gravou e entregou `vehicle.demobilization` com o veículo `FECHADA`."
+          },
+          "response": []
+        },
+        {
+          "name": "5.11 Integração - operação do evento fechada",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.code === 200 ? ((pm.response.json() || {}).data || {}) : {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando a integração consumir a fila (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message : '';",
+                  "  pm.test('VEHICLE_DEMOBILIZATION FINISHED (atual: ' + (d.status || pm.response.code) + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('VEHICLE_DEMOBILIZATION');",
+                  "    pm.expect(d.status).to.eql('FINISHED');",
+                  "  });",
+                  "  pm.test('saída pela fila (direction OUTBOUND, channel SQS)', () => { pm.expect(d.direction).to.eql('OUTBOUND'); pm.expect(d.channel).to.eql('SQS'); });",
+                  "  pm.test('idempotencyKey = VEHICLE_DEMOBILIZATION:<eventId>', () => pm.expect(d.idempotencyKey).to.eql('VEHICLE_DEMOBILIZATION:' + pm.collectionVariables.get('operationId')));",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "  pm.test('timeline até a entrega à Só Estoque', () => pm.expect((d.timeline || []).map((e) => e.step)).to.include.members(['REQUESTED', 'PROCESSING', 'VEHICLE_SAVED', 'SO_ESTOQUE_NOTIFIED', 'FINISHED']));",
+                  "  console.log(d);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "GET /vehicles/operations/{eventId} do evento entregue. Esperado: `FINISHED`."
+          },
+          "response": []
+        },
+        {
+          "name": "5.12 Integração - veículo com a desmobilização fechada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const v = ((pm.response.json() || {}).data || [])[0];",
+                  "pm.test('veículo {{placa}} na integração', () => pm.expect(v).to.be.an('object'));",
+                  "if (v) {",
+                  "  pm.test('situação FECHADA', () => pm.expect(v.situacao).to.eql('FECHADA'));",
+                  "  pm.test('mesma desmobilização', () => pm.expect(String(v.mensagem.dadosDesmobilizacao.codigoDesmobilizacao)).to.eql(String(pm.collectionVariables.get('codigoDesmobilizacao'))));",
+                  "  console.log(v);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles?placa={{placa}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles"
+              ],
+              "query": [
+                {
+                  "key": "placa",
+                  "value": "{{placa}}"
+                }
+              ]
+            },
+            "description": "O DynamoDB reflete a conclusão."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6 - Regras do log",
+      "description": "Mensagem fora do contrato publicada direto na fila de desmobilização (LocalStack): a integração descarta a mensagem e registra a operação em `ERROR`.",
+      "item": [
+        {
+          "name": "6.1 SQS - publicar desmobilização fora do contrato",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const eventId = pm.variables.replaceIn('{{$guid}}');",
+                  "pm.collectionVariables.set('eventoInvalido', eventId);",
+                  "const mensagem = {",
+                  "  eventId,",
+                  "  eventType: 'desmobilizacao.disponibilizada',",
+                  "  occurredAt: new Date().toISOString(),",
+                  "  CodigoOrganizacao: '1',",
+                  "  CnpjOrganizacao: '00000000000000',",
+                  "  CodigoVeiculo: '999999999',",
+                  "  Placa: 'TST0V00',",
+                  "  Situacao: 'pendente',",
+                  "  Mensagem: {},",
+                  "};",
+                  "pm.collectionVariables.set('corpoSqs', JSON.stringify({ QueueUrl: pm.collectionVariables.get('sqsUrl') + '/000000000000/locaviaweb-integracao-desmobilizacao-so-estoque', MessageBody: JSON.stringify(mensagem) }));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('publicada', () => pm.expect((pm.response.json() || {}).MessageId).to.be.a('string'));",
+                  "pm.collectionVariables.set('tentativas', '0');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-amz-json-1.0",
+                "type": "text"
+              },
+              {
+                "key": "X-Amz-Target",
+                "value": "AmazonSQS.SendMessage",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{sqsUrl}}/",
+              "host": [
+                "{{sqsUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Situação `pendente` não existe no contrato: erro de validação.",
+            "body": {
+              "mode": "raw",
+              "raw": "{{corpoSqs}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6.2 Integração - operação ERROR com erro de validação",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pausa = Date.now() + 3000;",
+                  "while (Date.now() < pausa) {}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.code === 200 ? ((pm.response.json() || {}).data || {}) : {};",
+                  "const pronto = d.status === 'FINISHED' || d.status === 'ERROR';",
+                  "const tentativa = Number(pm.collectionVariables.get('tentativas') || 0) + 1;",
+                  "if (!pronto && tentativa < 15) {",
+                  "  pm.collectionVariables.set('tentativas', String(tentativa));",
+                  "  if (typeof postman !== 'undefined') postman.setNextRequest(pm.info.requestName);",
+                  "  pm.test('aguardando a integração consumir a fila (tentativa ' + tentativa + '/15; fora do Runner, envie de novo)', () => true);",
+                  "} else {",
+                  "  pm.collectionVariables.set('tentativas', '0');",
+                  "  const erro = d.lastError ? ' - ' + d.lastError.code + ': ' + d.lastError.message : '';",
+                  "  pm.test('VEHICLE_DEMOBILIZATION ERROR (atual: ' + (d.status || pm.response.code) + erro + ')', () => {",
+                  "    pm.expect(d.type).to.eql('VEHICLE_DEMOBILIZATION');",
+                  "    pm.expect(d.status).to.eql('ERROR');",
+                  "  });",
+                  "  pm.test('saída pela fila (direction OUTBOUND, channel SQS)', () => { pm.expect(d.direction).to.eql('OUTBOUND'); pm.expect(d.channel).to.eql('SQS'); });",
+                  "  pm.test('idempotencyKey = VEHICLE_DEMOBILIZATION:<eventId>', () => pm.expect(d.idempotencyKey).to.eql('VEHICLE_DEMOBILIZATION:' + pm.collectionVariables.get('eventoInvalido')));",
+                  "  console.log((d.timeline || []).map((e) => e.step).join(' → '));",
+                  "  pm.test('ultimoErro.categoria VALIDATION, destino DELETE, sem nova tentativa', () => { pm.expect(d.lastError.category).to.eql('VALIDATION'); pm.expect(d.lastError.destination).to.eql('DELETE'); pm.expect(d.lastError.retryable).to.eql(false); });",
+                  "  pm.test('encerrada (finishedAt) e sem próxima tentativa', () => { pm.expect(d.finishedAt).to.be.a('string'); pm.expect(d.nextAttemptAt).to.be.undefined; });",
+                  "  pm.test('entrada recebida guardada no log', () => pm.expect(d.inputData.Situacao).to.eql('pendente'));",
+                  "  console.log(d);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/operations/{{eventoInvalido}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "operations",
+                "{{eventoInvalido}}"
+              ]
+            },
+            "description": "A mensagem inválida vira operação já encerrada em `ERROR`, com o corpo recebido."
+          },
+          "response": []
+        },
+        {
+          "name": "6.3 SQS - mensagem inválida descartada (fora da DLQ)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const corpos = ((pm.response.json() || {}).Messages || []).map((m) => m.Body);",
+                  "pm.test('evento inválido não está na DLQ', () => pm.expect(corpos.some((b) => b.includes(pm.collectionVariables.get('eventoInvalido')))).to.eql(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-amz-json-1.0",
+                "type": "text"
+              },
+              {
+                "key": "X-Amz-Target",
+                "value": "AmazonSQS.ReceiveMessage",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{sqsUrl}}/",
+              "host": [
+                "{{sqsUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Erro de validação é descartado (`DELETE`): a DLQ da desmobilização continua sem a mensagem.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"QueueUrl\":\"{{sqsUrl}}/000000000000/locaviaweb-integracao-desmobilizacao-so-estoque-dlq\",\"MaxNumberOfMessages\":10,\"VisibilityTimeout\":0}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6.4 Integração - 404 operação de reserva pelo endpoint de veículos",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.expect(pm.response.code).to.eql(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/operations/{{operationIdReserva}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "operations",
+                "{{operationIdReserva}}"
+              ]
+            },
+            "description": "Cada recurso só responde as operações do seu tipo (a operação de reserva é a do 2.2)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7 - Validações",
       "description": "Respostas de erro dos dois lados; não alteram o fluxo.",
       "item": [
         {
@@ -2972,11 +4383,265 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Integração - 404 operação de veículo inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.expect(pm.response.code).to.eql(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/operations/00000000-0000-0000-0000-000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "operations",
+                "00000000-0000-0000-0000-000000000000"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 401 GET /vehicles/{id} sem token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.expect(pm.response.code).to.eql(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/{{codigoVeiculo}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "{{codigoVeiculo}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 404 veículo inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.expect(pm.response.code).to.eql(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "999999999"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 400 código de veículo inválido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.expect(pm.response.code).to.eql(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/abc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "abc"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 404 manutenção de veículo inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.expect(pm.response.code).to.eql(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vehicles/999999999/maintenances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vehicles",
+                "999999999",
+                "maintenances"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Integração - 404 empresas (melhoria futura)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.expect(pm.response.code).to.eql(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/companies/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "companies",
+                "1"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Locavia - 400 placa maior que 10 caracteres",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.expect(pm.response.code).to.eql(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{locaviaToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{locaviaUrl}}/desmobilizacoes-integracao-gerenciador",
+              "host": [
+                "{{locaviaUrl}}"
+              ],
+              "path": [
+                "desmobilizacoes-integracao-gerenciador"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Placa\": \"ABCDEFGHIJK\",\n  \"page\": 1,\n  \"limit\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
         }
       ]
     },
     {
-      "name": "6 - Situação das filas",
+      "name": "8 - Situação das filas",
       "description": "Quantas mensagens estão esperando, em processamento e na DLQ em cada fila do LocalStack (`sqsUrl`). Use quando um passo ficar esperando: mensagem esperando = consumidor parado (Locavia ou integração fora do ar ou com o `.env` errado); em processamento por muito tempo = falha e nova tentativa (veja o log); na DLQ = falhou 5 vezes (o corpo aparece no console).",
       "item": [
         {
@@ -3348,9 +5013,9 @@
     },
     {
       "key": "codigoVeiculo",
-      "value": "",
+      "value": "6525",
       "type": "string",
-      "description": "Opcional: veículo do teste; vazio = primeira desmobilização disponível"
+      "description": "Veículo do teste (6525 KHP0394: À venda, com OS e itens na última OS); vazio = primeira desmobilização disponível"
     },
     {
       "key": "cpfCliente",
@@ -3393,6 +5058,66 @@
       "value": "",
       "type": "string",
       "description": "Montado por 1.1"
+    },
+    {
+      "key": "operationIdDesmobilizacao",
+      "value": "",
+      "type": "string",
+      "description": "CodigoOperacao gravado por 1.2"
+    },
+    {
+      "key": "situacaoVeiculo",
+      "value": "",
+      "type": "string",
+      "description": "Situação do veículo na integração, gravada por 1.5"
+    },
+    {
+      "key": "situacaoMinuscula",
+      "value": "",
+      "type": "string",
+      "description": "Montado por 1.7"
+    },
+    {
+      "key": "situacaoDesmobilizacao",
+      "value": "",
+      "type": "string",
+      "description": "IDSituacao da desmobilização do teste (A/L/N), gravada por 1.1"
+    },
+    {
+      "key": "dataPrevisaoTermino",
+      "value": "",
+      "type": "string",
+      "description": "Previsão de término da desmobilização do teste (AAAA-MM-DD), gravada por 1.1"
+    },
+    {
+      "key": "filtroSituacaoPeriodo",
+      "value": "",
+      "type": "string",
+      "description": "Montado por 1.9"
+    },
+    {
+      "key": "operationIdLote",
+      "value": "",
+      "type": "string",
+      "description": "CodigoOperacao gravado por 1.10"
+    },
+    {
+      "key": "operationIdReserva",
+      "value": "",
+      "type": "string",
+      "description": "Gravado por 2.2"
+    },
+    {
+      "key": "eventoInvalido",
+      "value": "",
+      "type": "string",
+      "description": "eventId da mensagem inválida, gravado por 6.1"
+    },
+    {
+      "key": "corpoSqs",
+      "value": "",
+      "type": "string",
+      "description": "Montado por 6.1"
     },
     {
       "key": "refReserva",
@@ -3447,6 +5172,12 @@
       "value": "",
       "type": "string",
       "description": "Montado no pagamento"
+    },
+    {
+      "key": "entregasAntes",
+      "value": "0",
+      "type": "string",
+      "description": "Entregas no mock antes da ação da pasta 5"
     },
     {
       "key": "operationId",
